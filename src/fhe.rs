@@ -157,39 +157,12 @@ fn multiply(a: Cipher<Signed>, b: Cipher<Signed>) -> Cipher<Signed> {
 
 #[cfg(test)]
 mod tests {
+    use bincode::deserialize;
+    use sunscreen::{types::bfv::Signed, RuntimeError};
+
     use super::*;
     use crate::pack::{pack_binary_operation, pack_binary_plain_operation, pack_nullary_operation};
-    use bincode::deserialize;
-    use once_cell::sync::Lazy;
-    use sunscreen::{types::bfv::Signed, PrivateKey, RuntimeError, SchemeType};
-
-    pub static PARAMS: Lazy<Params> = Lazy::new(|| Params {
-        lattice_dimension: 4096,
-        coeff_modulus: vec![0xffffee001, 0xffffc4001, 0x1ffffe0001],
-        plain_modulus: 4_096,
-        scheme_type: SchemeType::Bfv,
-        security_level: sunscreen::SecurityLevel::TC128,
-    });
-
-    pub static RUNTIME: Lazy<Runtime> = Lazy::new(|| Runtime::new(&PARAMS).unwrap());
-
-    /// Generate public and private keys that work with the testnet.
-    /// unnecessary galois portion (cuts keys from ~13MB to 1.3MB).
-    //
-    // Note clippy allowance can be removed when upgrading sunscreen
-    #[allow(clippy::result_large_err)]
-    pub fn generate_keys() -> Result<(PublicKey, PrivateKey), sunscreen::Error> {
-        let (public_key, private_key) = RUNTIME.generate_keys()?;
-        Ok((
-            PublicKey {
-                galois_key: None,
-                ..public_key
-            },
-            private_key,
-        ))
-    }
-
-    pub static FHE: Lazy<FheApp> = Lazy::new(|| FheApp::from_params(Lazy::force(&PARAMS)));
+    use crate::testnet::one::{generate_keys, FHE, RUNTIME};
 
     #[test]
     fn fhe_add_works() -> Result<(), RuntimeError> {
