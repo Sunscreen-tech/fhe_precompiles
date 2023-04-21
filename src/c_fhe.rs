@@ -75,4 +75,4 @@ create_c_precompile_function!(add_plain);
 create_c_precompile_function!(subtract);
 create_c_precompile_function!(subtract_plain);
 create_c_precompile_function!(multiply);
-create_c_precompile_function!(encypt_zero);
+create_c_precompile_function!(encrypt_zero);

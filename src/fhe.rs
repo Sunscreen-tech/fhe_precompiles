@@ -114,7 +114,7 @@ impl FheApp {
     /// Expects input to be packed with the
     /// [`pack_nullary_operation`][crate::pack::pack_nullary_operation()]
     /// function.
-    pub fn encypt_zero(&self, input: &[u8]) -> PrecompileResult {
+    pub fn encrypt_zero(&self, input: &[u8]) -> PrecompileResult {
         let public_key = unpack_nullary_operation(input)?;
         let zero = self
             .runtime
@@ -255,7 +255,7 @@ mod tests {
         let public_key_enc = pack_nullary_operation(&public_key);
 
         // run precompile w/o gas
-        let output = FHE.encypt_zero(&public_key_enc).unwrap();
+        let output = FHE.encrypt_zero(&public_key_enc).unwrap();
         // decode it
         let c_encrypted = deserialize(&output).unwrap();
         // decrypt it
