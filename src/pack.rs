@@ -3,7 +3,15 @@ use sunscreen::{types::bfv::Signed, Ciphertext, PublicKey};
 
 use crate::FheError;
 
-#[allow(dead_code)]
+/// Pack data for a binary FHE precompile computation, for example encrypted addition.
+///
+/// * `public_key` - Public key the parameters are encoded under.
+/// * `a` - First argument to a binary precompile
+/// * `b` - Second argument to a binary precompile
+///
+/// Returns a bytestring.
+///
+/// See also the inverse operation [`unpack_binary_operation`]
 pub fn pack_binary_operation(public_key: &PublicKey, a: &Ciphertext, b: &Ciphertext) -> Vec<u8> {
     let packed_public_key = serialize(public_key).unwrap();
     let packed_a = serialize(a).unwrap();
@@ -25,6 +33,13 @@ pub fn pack_binary_operation(public_key: &PublicKey, a: &Ciphertext, b: &Ciphert
     packed
 }
 
+/// Unpacks data for a binary FHE precompile computation, for example encrypted addition.
+///
+/// * `input` - Bytestring representing the FHE computation to run.
+///
+/// Returns the public key and `Ciphertext` arguments to the precompile.
+///
+/// See also the inverse operation [`pack_binary_operation`]
 pub fn unpack_binary_operation(
     input: &[u8],
 ) -> Result<(PublicKey, Ciphertext, Ciphertext), FheError> {
@@ -52,6 +67,16 @@ pub fn unpack_binary_operation(
     Ok((public_key, a, b))
 }
 
+/// Pack data for a binary plaintext FHE precompile computation, for example
+/// adding a plaintext number to an encrypted number.
+///
+/// * `public_key` - Public key the parameters are encoded under.
+/// * `encrypted_argument` - The encrypted value in the binary operation.
+/// * `plaintext_argument` - The plaintext value in the binary operation.
+///
+/// Returns a bytestring.
+///
+/// See also the inverse operation [`unpack_binary_plain_operation`]
 pub fn pack_binary_plain_operation(
     public_key: &PublicKey,
     encrypted_argument: &Ciphertext,
@@ -74,6 +99,14 @@ pub fn pack_binary_plain_operation(
     packed
 }
 
+/// Unpack data for a binary plaintext FHE precompile computation, for example
+/// adding a plaintext number to an encrypted number.
+///
+/// * `input` - Bytestring representing the FHE computation to run.
+///
+/// Returns the public key and encrypted/plaintext arguments for the precompile.
+///
+/// See also the inverse operation [`pack_binary_plain_operation`]
 pub fn unpack_binary_plain_operation(
     input: &[u8],
 ) -> Result<(PublicKey, Ciphertext, Signed), FheError> {
@@ -101,10 +134,167 @@ pub fn unpack_binary_plain_operation(
     Ok((public_key, encrypted_argument, plaintext_argument.into()))
 }
 
+/// Pack data for a nullary FHE precompile computation, for example
+/// encrypting a zero value.
+///
+/// * `public_key` - Public key the parameters are encoded under.
+///
+/// Returns a bytestring.
+///
+/// See also the inverse operation [`unpack_nullary_operation`]
 pub fn pack_nullary_operation(public_key: &PublicKey) -> Vec<u8> {
     serialize(public_key).unwrap()
 }
 
+/// Unpack data for a nullary FHE precompile computation, for example
+/// encrypting a zero value.
+///
+/// * `input` - Bytestring representing the FHE computation to run.
+///
+/// Returns the public key.
+///
+/// See also the inverse operation [`pack_nullary_operation`]
 pub fn unpack_nullary_operation(input: &[u8]) -> Result<PublicKey, FheError> {
     deserialize(input).map_err(|_| FheError::InvalidEncoding)
+}
+
+#[cfg(test)]
+mod tests {
+    use bincode::serialize;
+    use once_cell::sync::Lazy;
+    use sunscreen::{Params, PrivateKey, Runtime, SchemeType};
+
+    use crate::pack::{pack_binary_operation, pack_binary_plain_operation, pack_nullary_operation};
+
+    use super::*;
+
+    pub static PARAMS: Lazy<Params> = Lazy::new(|| Params {
+        lattice_dimension: 4096,
+        coeff_modulus: vec![0xffffee001, 0xffffc4001, 0x1ffffe0001],
+        plain_modulus: 4_096,
+        scheme_type: SchemeType::Bfv,
+        security_level: sunscreen::SecurityLevel::TC128,
+    });
+
+    pub static RUNTIME: Lazy<Runtime> = Lazy::new(|| Runtime::new(&PARAMS).unwrap());
+
+    #[allow(clippy::result_large_err)]
+    pub fn generate_keys() -> Result<(PublicKey, PrivateKey), sunscreen::Error> {
+        let (public_key, private_key) = RUNTIME.generate_keys()?;
+        Ok((
+            PublicKey {
+                galois_key: None,
+                ..public_key
+            },
+            private_key,
+        ))
+    }
+
+    fn assert_serialized_eq<T>(a: &T, b: &T)
+    where
+        T: ?Sized + serde::Serialize,
+    {
+        assert_eq!(serialize(&a).unwrap(), serialize(&b).unwrap());
+    }
+
+    #[test]
+    fn unpack_pack_binary_is_id() -> Result<(), FheError> {
+        let (public_key, _) = generate_keys().unwrap();
+
+        let a = RUNTIME.encrypt(Signed::from(16), &public_key).unwrap();
+        let b = RUNTIME.encrypt(Signed::from(4), &public_key).unwrap();
+
+        let input = pack_binary_operation(&public_key, &a, &b);
+        let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
+            unpack_binary_operation(&input)?;
+
+        assert_serialized_eq(&public_key, &public_key_reconstituted);
+        assert_serialized_eq(&a, &a_reconstituted);
+        assert_serialized_eq(&b, &b_reconstituted);
+        Ok(())
+    }
+
+    #[test]
+    fn pack_unpack_binary_is_id() -> Result<(), FheError> {
+        let (public_key, _) = generate_keys().unwrap();
+
+        let a = RUNTIME.encrypt(Signed::from(16), &public_key).unwrap();
+        let b = RUNTIME.encrypt(Signed::from(4), &public_key).unwrap();
+
+        let input = pack_binary_operation(&public_key, &a, &b);
+
+        let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
+            unpack_binary_operation(&input)?;
+
+        let repacked_input = pack_binary_operation(
+            &public_key_reconstituted,
+            &a_reconstituted,
+            &b_reconstituted,
+        );
+
+        assert_serialized_eq(&input, &repacked_input);
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_binary_plain_is_id() -> Result<(), FheError> {
+        let (public_key, _) = generate_keys().unwrap();
+
+        let a = RUNTIME.encrypt(Signed::from(16), &public_key).unwrap();
+        let b = Signed::from(4);
+
+        let input = pack_binary_plain_operation(&public_key, &a, &b);
+        let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
+            unpack_binary_plain_operation(&input)?;
+
+        assert_serialized_eq(&public_key, &public_key_reconstituted);
+        assert_serialized_eq(&a, &a_reconstituted);
+        assert_eq!(b, b_reconstituted);
+        Ok(())
+    }
+
+    #[test]
+    fn pack_unpack_binary_plain_is_id() -> Result<(), FheError> {
+        let (public_key, _) = generate_keys().unwrap();
+
+        let a = RUNTIME.encrypt(Signed::from(16), &public_key).unwrap();
+        let b = Signed::from(4);
+
+        let input = pack_binary_plain_operation(&public_key, &a, &b);
+
+        let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
+            unpack_binary_plain_operation(&input)?;
+
+        let repacked_input = pack_binary_plain_operation(
+            &public_key_reconstituted,
+            &a_reconstituted,
+            &b_reconstituted,
+        );
+
+        assert_serialized_eq(&input, &repacked_input);
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_nullary_is_id() -> Result<(), FheError> {
+        let (public_key, _) = generate_keys().unwrap();
+
+        let input = pack_nullary_operation(&public_key);
+        let public_key_reconstituted = unpack_nullary_operation(&input)?;
+
+        assert_serialized_eq(&public_key, &public_key_reconstituted);
+        Ok(())
+    }
+
+    #[test]
+    fn pack_unpack_nullary_is_id() -> Result<(), FheError> {
+        let (public_key, _) = generate_keys().unwrap();
+
+        let input = pack_nullary_operation(&public_key);
+        let public_key_reconstituted = unpack_nullary_operation(&input)?;
+        let repacked_input = pack_nullary_operation(&public_key_reconstituted);
+
+        assert_serialized_eq(&input, &repacked_input);
+        Ok(())
+    }
 }
