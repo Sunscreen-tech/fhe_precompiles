@@ -33,5 +33,5 @@ pub mod one {
     }
 
     /// The FHE precompile operations available in the first testnet.
-    pub static FHE: Lazy<FheApp> = Lazy::new(|| FheApp::from_params(Lazy::force(&PARAMS)));
+    pub static FHE: Lazy<FheApp> = Lazy::new(|| FheApp::from_params(&PARAMS));
 }
