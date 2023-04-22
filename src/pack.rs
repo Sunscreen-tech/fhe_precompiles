@@ -164,7 +164,7 @@ mod tests {
 
     use super::*;
     use crate::pack::{pack_binary_operation, pack_binary_plain_operation, pack_nullary_operation};
-    use crate::testnet::one::{generate_keys, RUNTIME};
+    use crate::testnet::one::FHE;
 
     fn assert_serialized_eq<T>(a: &T, b: &T)
     where
@@ -175,10 +175,13 @@ mod tests {
 
     #[test]
     fn unpack_pack_binary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = generate_keys().unwrap();
+        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
 
-        let a = RUNTIME.encrypt(Signed::from(16), &public_key).unwrap();
-        let b = RUNTIME.encrypt(Signed::from(4), &public_key).unwrap();
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
+        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
 
         let input = pack_binary_operation(&public_key, &a, &b);
         let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
@@ -192,10 +195,13 @@ mod tests {
 
     #[test]
     fn pack_unpack_binary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = generate_keys().unwrap();
+        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
 
-        let a = RUNTIME.encrypt(Signed::from(16), &public_key).unwrap();
-        let b = RUNTIME.encrypt(Signed::from(4), &public_key).unwrap();
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
+        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
 
         let input = pack_binary_operation(&public_key, &a, &b);
 
@@ -214,9 +220,12 @@ mod tests {
 
     #[test]
     fn unpack_pack_binary_plain_is_id() -> Result<(), FheError> {
-        let (public_key, _) = generate_keys().unwrap();
+        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
 
-        let a = RUNTIME.encrypt(Signed::from(16), &public_key).unwrap();
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
         let b = Signed::from(4);
 
         let input = pack_binary_plain_operation(&public_key, &a, &b);
@@ -231,9 +240,12 @@ mod tests {
 
     #[test]
     fn pack_unpack_binary_plain_is_id() -> Result<(), FheError> {
-        let (public_key, _) = generate_keys().unwrap();
+        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
 
-        let a = RUNTIME.encrypt(Signed::from(16), &public_key).unwrap();
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
         let b = Signed::from(4);
 
         let input = pack_binary_plain_operation(&public_key, &a, &b);
@@ -253,7 +265,7 @@ mod tests {
 
     #[test]
     fn unpack_pack_nullary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = generate_keys().unwrap();
+        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
 
         let input = pack_nullary_operation(&public_key);
         let public_key_reconstituted = unpack_nullary_operation(&input)?;
@@ -264,7 +276,7 @@ mod tests {
 
     #[test]
     fn pack_unpack_nullary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = generate_keys().unwrap();
+        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
 
         let input = pack_nullary_operation(&public_key);
         let public_key_reconstituted = unpack_nullary_operation(&input)?;
