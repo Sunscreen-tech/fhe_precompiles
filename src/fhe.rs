@@ -63,23 +63,22 @@ impl FheApp {
 
     /// Generate keys for an FHE application.
     pub fn generate_keys(&self) -> Result<(PublicKey, PrivateKey), RuntimeError> {
-        let (public_key, private_key) = self.runtime.generate_keys()?;
-
-        Ok((public_key, private_key))
+        self.runtime.generate_keys()
     }
 
     /// Generate keys for an FHE application without the galois keys, which
     /// enables a significant reduction in key size if you do not plan to
     /// perform the rotations that the Galois keys provide.
     pub fn generate_keys_without_galois(&self) -> Result<(PublicKey, PrivateKey), RuntimeError> {
-        let (public_key, private_key) = self.generate_keys()?;
-
-        let public_key = PublicKey {
-            galois_key: None,
-            ..public_key
-        };
-
-        Ok((public_key, private_key))
+        self.generate_keys().map(|(public_key, private_key)| {
+            (
+                PublicKey {
+                    galois_key: None,
+                    ..public_key
+                },
+                private_key,
+            )
+        })
     }
 
     fn run(
