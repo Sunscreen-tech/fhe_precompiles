@@ -6,7 +6,8 @@ use bincode::serialize;
 use sunscreen::{
     fhe_program,
     types::{bfv::Signed, Cipher},
-    Application, Ciphertext, Compiler, FheProgramInput, Params, PublicKey, Runtime, RuntimeError,
+    Ciphertext, Compiler, FheApplication, FheProgramInput, FheRuntime, Params, PublicKey, Runtime,
+    RuntimeError,
 };
 
 /// Expects input to be packed with the
@@ -35,8 +36,8 @@ where
 }
 
 pub struct FheApp {
-    application: Application,
-    runtime: Runtime,
+    application: FheApplication,
+    runtime: FheRuntime,
 }
 
 impl FheApp {
@@ -51,7 +52,7 @@ impl FheApp {
             .with_params(&params)
             .compile()
             .unwrap();
-        let runtime = Runtime::new(&params).unwrap();
+        let runtime = Runtime::new_fhe(&params).unwrap();
 
         Self {
             application,
@@ -68,7 +69,7 @@ impl FheApp {
     ) -> Result<Ciphertext, RuntimeError> {
         self.runtime
             .run(
-                self.application.get_program(program).unwrap(),
+                self.application.get_fhe_program(program).unwrap(),
                 vec![a.into(), b.into()],
                 &public_key,
             )

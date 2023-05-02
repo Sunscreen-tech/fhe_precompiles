@@ -1,7 +1,7 @@
 /// Parameters related to the first testnet
 pub mod one {
     use once_cell::sync::Lazy;
-    use sunscreen::{Params, PrivateKey, PublicKey, Runtime, SchemeType};
+    use sunscreen::{FheRuntime, Params, PrivateKey, PublicKey, Runtime, SchemeType};
 
     use crate::fhe::FheApp;
 
@@ -14,12 +14,10 @@ pub mod one {
         security_level: sunscreen::SecurityLevel::TC128,
     });
 
-    /// [`sunscreen::Runtime`] for the first testnet
-    pub static RUNTIME: Lazy<Runtime> = Lazy::new(|| Runtime::new(&PARAMS).unwrap());
+    /// [`sunscreen::FheRuntime`] for the first testnet
+    pub static RUNTIME: Lazy<FheRuntime> = Lazy::new(|| Runtime::new_fhe(&PARAMS).unwrap());
 
     /// Generate public and private keys that work with the first testnet.
-    // Note clippy allowance can be removed when upgrading sunscreen
-    #[allow(clippy::result_large_err)]
     pub fn generate_keys() -> Result<(PublicKey, PrivateKey), sunscreen::Error> {
         let (public_key, private_key) = RUNTIME.generate_keys()?;
         Ok((
