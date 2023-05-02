@@ -219,46 +219,41 @@ mod tests {
     #[test]
     fn precompile_add_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.add(input);
-        precompile_fhe_op_works(precompile, 4u8.into(), 5u8.into(), (4u8 + 5).into())
+        let arg1 = U256::from_words([1, 1, 1, 0]);
+        let arg2 = U256::from_words([0, 0, u64::MAX, 0]);
+        precompile_fhe_op_works(precompile, arg1, arg2, arg1.wrapping_add(&arg2))
     }
 
     #[test]
     fn precompile_subtract_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.subtract(input);
-        precompile_fhe_op_works(
-            precompile,
-            11341_u32.into(),
-            134_u32.into(),
-            (11341_u32 - 134).into(),
-        )
+        let arg1 = U256::from_words([1, 0, 1, 0]);
+        let arg2 = U256::from_words([0, u64::MAX / 2, u64::MAX, 0]);
+        precompile_fhe_op_works(precompile, arg1, arg2, arg1.wrapping_sub(&arg2))
     }
 
     #[test]
     fn precompile_multiply_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.multiply(input);
-        precompile_fhe_op_works(precompile, 4u8.into(), 5u8.into(), (4u8 * 5).into())
+        let arg1 = U256::from_words([0, 0, 1, 1]);
+        let arg2 = U256::from_words([100, u64::MAX / 2, 0, 1]);
+        precompile_fhe_op_works(precompile, arg1, arg2, arg1.wrapping_mul(&arg2))
     }
 
     #[test]
     fn precompile_add_plain_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.add_plain(input);
-        precompile_fhe_plain_op_works(
-            precompile,
-            82_u32.into(),
-            145_u32.into(),
-            (82_u32 + 145).into(),
-        )
+        let arg1 = U256::from_words([1, 1, 1, 0]);
+        let arg2 = U256::from_words([0, 0, u64::MAX, 0]);
+        precompile_fhe_plain_op_works(precompile, arg1, arg2, arg1.wrapping_add(&arg2))
     }
 
     #[test]
     fn precompile_subtract_plain_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.subtract_plain(input);
-        precompile_fhe_plain_op_works(
-            precompile,
-            315_u32.into(),
-            64_u32.into(),
-            (315_u32 - 64).into(),
-        )
+        let arg1 = U256::from_words([0, 0, 0, 10]);
+        let arg2 = U256::from_words([1, 1, 1, 5]);
+        precompile_fhe_plain_op_works(precompile, arg1, arg2, arg1.wrapping_sub(&arg2))
     }
 
     #[test]
@@ -305,7 +300,7 @@ mod tests {
         // decrypt it
         let c: Unsigned256 = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
 
-        assert_eq!(expected, U256::from(c));
+        assert_eq!(U256::from(c), expected);
         Ok(())
     }
 
@@ -334,7 +329,7 @@ mod tests {
         // decrypt it
         let c: Unsigned256 = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
 
-        assert_eq!(expected, U256::from(c));
+        assert_eq!(U256::from(c), expected);
         Ok(())
     }
 }
