@@ -35,6 +35,20 @@ where
     Ok(serialize(&result).unwrap())
 }
 
+/// Generate keys for an FHE application without the galois keys. Meant to be
+/// wrapped in other functions in this crate only.
+pub(crate) fn generate_keys(runtime: &FheRuntime) -> Result<(PublicKey, PrivateKey), RuntimeError> {
+    runtime.generate_keys().map(|(public_key, private_key)| {
+        (
+            PublicKey {
+                galois_key: None,
+                ..public_key
+            },
+            private_key,
+        )
+    })
+}
+
 pub struct FheApp {
     application: FheApplication,
     runtime: FheRuntime,
@@ -63,17 +77,7 @@ impl FheApp {
 
     /// Generate keys for an FHE application.
     pub fn generate_keys(&self) -> Result<(PublicKey, PrivateKey), RuntimeError> {
-        self.runtime
-            .generate_keys()
-            .map(|(public_key, private_key)| {
-                (
-                    PublicKey {
-                        galois_key: None,
-                        ..public_key
-                    },
-                    private_key,
-                )
-            })
+        generate_keys(&self.runtime)
     }
 
     fn run(
