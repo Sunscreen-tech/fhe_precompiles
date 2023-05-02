@@ -6,6 +6,9 @@ on:
 
 name: Rust
 
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+
 jobs:
 
   build:
@@ -15,7 +18,8 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
-        persist-credentials: false
+        with:
+          persist-credentials: false
 
       - name: Reconfigure git to use HTTP authentication
         run: >
