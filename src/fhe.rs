@@ -63,22 +63,17 @@ impl FheApp {
 
     /// Generate keys for an FHE application.
     pub fn generate_keys(&self) -> Result<(PublicKey, PrivateKey), RuntimeError> {
-        self.runtime.generate_keys()
-    }
-
-    /// Generate keys for an FHE application without the galois keys, which
-    /// enables a significant reduction in key size if you do not plan to
-    /// perform the rotations that the Galois keys provide.
-    pub fn generate_keys_without_galois(&self) -> Result<(PublicKey, PrivateKey), RuntimeError> {
-        self.generate_keys().map(|(public_key, private_key)| {
-            (
-                PublicKey {
-                    galois_key: None,
-                    ..public_key
-                },
-                private_key,
-            )
-        })
+        self.runtime
+            .generate_keys()
+            .map(|(public_key, private_key)| {
+                (
+                    PublicKey {
+                        galois_key: None,
+                        ..public_key
+                    },
+                    private_key,
+                )
+            })
     }
 
     fn run(
@@ -192,7 +187,7 @@ mod tests {
 
     #[test]
     fn fhe_add_works() -> Result<(), RuntimeError> {
-        let (public_key, private_key) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         let a = FHE.runtime.encrypt(Signed::from(16), &public_key)?;
         let b = FHE.runtime.encrypt(Signed::from(4), &public_key)?;
@@ -205,7 +200,7 @@ mod tests {
 
     #[test]
     fn fhe_multiply_works() -> Result<(), RuntimeError> {
-        let (public_key, private_key) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         let a = FHE.runtime.encrypt(Signed::from(16), &public_key)?;
         let b = FHE.runtime.encrypt(Signed::from(4), &public_key)?;
@@ -248,7 +243,7 @@ mod tests {
 
     #[test]
     fn precompile_encrypt_zero_works() -> Result<(), RuntimeError> {
-        let (public_key, private_key) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         // Encode public_key
         let public_key_enc = pack_nullary_operation(&public_key);
@@ -273,7 +268,7 @@ mod tests {
     where
         F: Fn(&[u8]) -> PrecompileResult,
     {
-        let (public_key, private_key) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         // Encrypt values
         let a_encrypted = FHE.runtime.encrypt(Signed::from(a), &public_key)?;
@@ -303,7 +298,7 @@ mod tests {
     where
         F: Fn(&[u8]) -> PrecompileResult,
     {
-        let (public_key, private_key) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         // Encrypt a
         let a_encrypted = FHE.runtime.encrypt(Signed::from(a), &public_key)?;

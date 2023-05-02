@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn unpack_pack_binary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, _) = FHE.generate_keys().unwrap();
 
         let a = FHE
             .runtime()
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn pack_unpack_binary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, _) = FHE.generate_keys().unwrap();
 
         let a = FHE
             .runtime()
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn unpack_pack_binary_plain_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, _) = FHE.generate_keys().unwrap();
 
         let a = FHE
             .runtime()
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn pack_unpack_binary_plain_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, _) = FHE.generate_keys().unwrap();
 
         let a = FHE
             .runtime()
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn unpack_pack_nullary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, _) = FHE.generate_keys().unwrap();
 
         let input = pack_nullary_operation(&public_key);
         let public_key_reconstituted = unpack_nullary_operation(&input)?;
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn pack_unpack_nullary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys_without_galois().unwrap();
+        let (public_key, _) = FHE.generate_keys().unwrap();
 
         let input = pack_nullary_operation(&public_key);
         let public_key_reconstituted = unpack_nullary_operation(&input)?;
