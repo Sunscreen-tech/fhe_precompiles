@@ -5,7 +5,7 @@ use crate::pack::{
 use bincode::serialize;
 use sunscreen::{
     fhe_program,
-    types::{bfv::Signed, Cipher},
+    types::{bfv::Unsigned256, Cipher},
     Ciphertext, Compiler, FheApplication, FheProgramInput, FheRuntime, Params, PrivateKey,
     PublicKey, Runtime, RuntimeError,
 };
@@ -26,7 +26,7 @@ where
 /// function.
 fn fhe_binary_op_plain<F>(op: F, input: &[u8]) -> PrecompileResult
 where
-    F: FnOnce(Ciphertext, Signed, PublicKey) -> Result<Ciphertext, RuntimeError>,
+    F: FnOnce(Ciphertext, Unsigned256, PublicKey) -> Result<Ciphertext, RuntimeError>,
 {
     let (public_key, encrypted_argument, plaintext_argument) =
         unpack_binary_plain_operation(input)?;
@@ -120,7 +120,7 @@ impl FheApp {
     /// Expects input to be packed with the
     /// [`pack_binary_plain_operation`][crate::pack::pack_binary_plain_operation()]
     /// function.  The response is the bincode-encoded encrypted difference
-    /// `encrypted - (signed as i64)`.
+    /// `ciphertext - plaintext`.
     pub fn subtract_plain(&self, input: &[u8]) -> PrecompileResult {
         fhe_binary_op_plain(|a, b, key| self.run(subtract_plain, a, b, key), input)
     }
@@ -139,7 +139,7 @@ impl FheApp {
         let public_key = unpack_nullary_operation(input)?;
         let zero = self
             .runtime
-            .encrypt(Signed::from(0), &public_key)
+            .encrypt(Unsigned256::from(0), &public_key)
             .map_err(FheError::SunscreenError)?;
 
         Ok(serialize(&zero).unwrap())
@@ -152,38 +152,39 @@ impl FheApp {
 
 /// Addition
 #[fhe_program(scheme = "bfv")]
-fn add(a: Cipher<Signed>, b: Cipher<Signed>) -> Cipher<Signed> {
+fn add(a: Cipher<Unsigned256>, b: Cipher<Unsigned256>) -> Cipher<Unsigned256> {
     a + b
 }
 
 /// Addition with plaintext
 #[fhe_program(scheme = "bfv")]
-fn add_plain(a: Cipher<Signed>, b: Signed) -> Cipher<Signed> {
+fn add_plain(a: Cipher<Unsigned256>, b: Unsigned256) -> Cipher<Unsigned256> {
     a + b
 }
 
 /// Subtraction
 #[fhe_program(scheme = "bfv")]
-fn subtract(a: Cipher<Signed>, b: Cipher<Signed>) -> Cipher<Signed> {
+fn subtract(a: Cipher<Unsigned256>, b: Cipher<Unsigned256>) -> Cipher<Unsigned256> {
     a - b
 }
 
 /// Subtraction with plaintext
 #[fhe_program(scheme = "bfv")]
-fn subtract_plain(a: Cipher<Signed>, b: Signed) -> Cipher<Signed> {
+fn subtract_plain(a: Cipher<Unsigned256>, b: Unsigned256) -> Cipher<Unsigned256> {
     a - b
 }
 
 /// Multiplication
 #[fhe_program(scheme = "bfv")]
-fn multiply(a: Cipher<Signed>, b: Cipher<Signed>) -> Cipher<Signed> {
+fn multiply(a: Cipher<Unsigned256>, b: Cipher<Unsigned256>) -> Cipher<Unsigned256> {
     a * b
 }
 
 #[cfg(test)]
 mod tests {
     use bincode::deserialize;
-    use sunscreen::{types::bfv::Signed, RuntimeError};
+    use crypto_bigint::U256;
+    use sunscreen::{types::bfv::Unsigned256, RuntimeError};
 
     use super::*;
     use crate::pack::{pack_binary_operation, pack_binary_plain_operation, pack_nullary_operation};
@@ -193,12 +194,12 @@ mod tests {
     fn fhe_add_works() -> Result<(), RuntimeError> {
         let (public_key, private_key) = FHE.generate_keys().unwrap();
 
-        let a = FHE.runtime.encrypt(Signed::from(16), &public_key)?;
-        let b = FHE.runtime.encrypt(Signed::from(4), &public_key)?;
+        let a = FHE.runtime.encrypt(Unsigned256::from(16), &public_key)?;
+        let b = FHE.runtime.encrypt(Unsigned256::from(4), &public_key)?;
 
         let result = FHE.run(add, a, b, public_key)?;
-        let c: Signed = FHE.runtime.decrypt(&result, &private_key)?;
-        assert_eq!(<Signed as Into<i64>>::into(c), 20_i64);
+        let c: Unsigned256 = FHE.runtime.decrypt(&result, &private_key)?;
+        assert_eq!(c, Unsigned256::from(20_u64));
         Ok(())
     }
 
@@ -206,43 +207,58 @@ mod tests {
     fn fhe_multiply_works() -> Result<(), RuntimeError> {
         let (public_key, private_key) = FHE.generate_keys().unwrap();
 
-        let a = FHE.runtime.encrypt(Signed::from(16), &public_key)?;
-        let b = FHE.runtime.encrypt(Signed::from(4), &public_key)?;
+        let a = FHE.runtime.encrypt(Unsigned256::from(16), &public_key)?;
+        let b = FHE.runtime.encrypt(Unsigned256::from(4), &public_key)?;
 
         let result = FHE.run(multiply, a, b, public_key)?;
-        let c: Signed = FHE.runtime.decrypt(&result, &private_key)?;
-        assert_eq!(<Signed as Into<i64>>::into(c), 64_i64);
+        let c: Unsigned256 = FHE.runtime.decrypt(&result, &private_key)?;
+        assert_eq!(c, Unsigned256::from(64_u64));
         Ok(())
     }
 
     #[test]
     fn precompile_add_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.add(input);
-        precompile_fhe_op_works(precompile, 4, 5, 4 + 5)
+        precompile_fhe_op_works(precompile, 4u8.into(), 5u8.into(), (4u8 + 5).into())
     }
 
     #[test]
     fn precompile_subtract_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.subtract(input);
-        precompile_fhe_op_works(precompile, 11341, 134, 11341 - 134)
+        precompile_fhe_op_works(
+            precompile,
+            11341_u32.into(),
+            134_u32.into(),
+            (11341_u32 - 134).into(),
+        )
     }
 
     #[test]
     fn precompile_multiply_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.multiply(input);
-        precompile_fhe_op_works(precompile, 4, 5, 4 * 5)
+        precompile_fhe_op_works(precompile, 4u8.into(), 5u8.into(), (4u8 * 5).into())
     }
 
     #[test]
     fn precompile_add_plain_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.add_plain(input);
-        precompile_fhe_plain_op_works(precompile, 82, 145, 82 + 145)
+        precompile_fhe_plain_op_works(
+            precompile,
+            82_u32.into(),
+            145_u32.into(),
+            (82_u32 + 145).into(),
+        )
     }
 
     #[test]
     fn precompile_subtract_plain_works() -> Result<(), RuntimeError> {
         let precompile = |input: &[u8]| FHE.subtract_plain(input);
-        precompile_fhe_plain_op_works(precompile, 315, 64, 315 - 64)
+        precompile_fhe_plain_op_works(
+            precompile,
+            315_u32.into(),
+            64_u32.into(),
+            (315_u32 - 64).into(),
+        )
     }
 
     #[test]
@@ -257,17 +273,17 @@ mod tests {
         // decode it
         let c_encrypted = deserialize(&output).unwrap();
         // decrypt it
-        let c: Signed = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
+        let c: Unsigned256 = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
 
-        assert_eq!(0, <Signed as Into<i64>>::into(c));
+        assert_eq!(c, Unsigned256::from(0u64));
         Ok(())
     }
 
     fn precompile_fhe_op_works<F>(
         fhe_op: F,
-        a: i64,
-        b: i64,
-        expected: i64,
+        a: U256,
+        b: U256,
+        expected: U256,
     ) -> Result<(), RuntimeError>
     where
         F: Fn(&[u8]) -> PrecompileResult,
@@ -275,8 +291,8 @@ mod tests {
         let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         // Encrypt values
-        let a_encrypted = FHE.runtime.encrypt(Signed::from(a), &public_key)?;
-        let b_encrypted = FHE.runtime.encrypt(Signed::from(b), &public_key)?;
+        let a_encrypted = FHE.runtime.encrypt(Unsigned256::from(a), &public_key)?;
+        let b_encrypted = FHE.runtime.encrypt(Unsigned256::from(b), &public_key)?;
 
         let input = pack_binary_operation(&public_key, &a_encrypted, &b_encrypted);
 
@@ -287,17 +303,17 @@ mod tests {
         let c_encrypted = deserialize(&output).unwrap();
 
         // decrypt it
-        let c: Signed = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
+        let c: Unsigned256 = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
 
-        assert_eq!(expected, <Signed as Into<i64>>::into(c));
+        assert_eq!(expected, U256::from(c));
         Ok(())
     }
 
     fn precompile_fhe_plain_op_works<F>(
         fhe_op: F,
-        a: i64,
-        b: i64,
-        expected: i64,
+        a: U256,
+        b: U256,
+        expected: U256,
     ) -> Result<(), RuntimeError>
     where
         F: Fn(&[u8]) -> PrecompileResult,
@@ -305,9 +321,9 @@ mod tests {
         let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         // Encrypt a
-        let a_encrypted = FHE.runtime.encrypt(Signed::from(a), &public_key)?;
+        let a_encrypted = FHE.runtime.encrypt(Unsigned256::from(a), &public_key)?;
 
-        let input = pack_binary_plain_operation(&public_key, &a_encrypted, &Signed::from(b));
+        let input = pack_binary_plain_operation(&public_key, &a_encrypted, &Unsigned256::from(b));
 
         // run precompile
         let output = fhe_op(&input).unwrap();
@@ -316,9 +332,9 @@ mod tests {
         let c_encrypted = deserialize(&output).unwrap();
 
         // decrypt it
-        let c: Signed = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
+        let c: Unsigned256 = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
 
-        assert_eq!(expected, <Signed as Into<i64>>::into(c));
+        assert_eq!(expected, U256::from(c));
         Ok(())
     }
 }

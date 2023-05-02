@@ -1,7 +1,11 @@
 use bincode::{deserialize, serialize};
-use sunscreen::{types::bfv::Signed, Ciphertext, PublicKey};
+use crypto_bigint::{Encoding, U256};
+use sunscreen::{types::bfv::Unsigned256, Ciphertext, PublicKey};
 
 use crate::FheError;
+
+/// This is the integral type we use to index into the precompile input byte arrays.
+type Index = u32;
 
 /// Pack data for a binary FHE precompile computation, for example encrypted addition.
 ///
@@ -17,11 +21,11 @@ pub fn pack_binary_operation(public_key: &PublicKey, a: &Ciphertext, b: &Ciphert
     let packed_a = serialize(a).unwrap();
     let packed_b = serialize(b).unwrap();
 
-    let arg_offset_1: u32 = packed_public_key.len().try_into().unwrap();
-    let arg_offset_1 = arg_offset_1 + 8;
+    let arg_offset_1 = packed_public_key.len() + 2 * std::mem::size_of::<Index>();
+    let arg_offset_2 = arg_offset_1 + packed_a.len();
 
-    let arg_offset_2: u32 = packed_a.len().try_into().unwrap();
-    let arg_offset_2 = arg_offset_1 + arg_offset_2;
+    let arg_offset_1: Index = arg_offset_1.try_into().unwrap();
+    let arg_offset_2: Index = arg_offset_2.try_into().unwrap();
 
     let mut packed = Vec::new();
     packed.extend(arg_offset_1.to_be_bytes());
@@ -43,15 +47,17 @@ pub fn pack_binary_operation(public_key: &PublicKey, a: &Ciphertext, b: &Ciphert
 pub fn unpack_binary_operation(
     input: &[u8],
 ) -> Result<(PublicKey, Ciphertext, Ciphertext), FheError> {
-    if input.len() < 8 {
+    let ix_size = std::mem::size_of::<Index>();
+
+    if input.len() < 2 * ix_size {
         return Err(FheError::UnexpectedEOF);
     }
-    let ix_1 = &input[..4];
-    let ix_2 = &input[4..8];
+    let ix_1 = &input[..ix_size];
+    let ix_2 = &input[ix_size..ix_size * 2];
 
     // The following unwraps are safe due to length check above
-    let ix_1 = u32::from_be_bytes(ix_1.try_into().unwrap());
-    let ix_2 = u32::from_be_bytes(ix_2.try_into().unwrap());
+    let ix_1 = Index::from_be_bytes(ix_1.try_into().unwrap());
+    let ix_2 = Index::from_be_bytes(ix_2.try_into().unwrap());
 
     let ix_1: usize = ix_1
         .try_into()
@@ -60,7 +66,8 @@ pub fn unpack_binary_operation(
         .try_into()
         .map_err(|_| FheError::PlatformArchitecture)?;
 
-    let public_key = deserialize(&input[8..ix_1]).map_err(|_| FheError::InvalidEncoding)?;
+    let public_key =
+        deserialize(&input[ix_size * 2..ix_1]).map_err(|_| FheError::InvalidEncoding)?;
     let a = deserialize(&input[ix_1..ix_2]).map_err(|_| FheError::InvalidEncoding)?;
     let b = deserialize(&input[ix_2..]).map_err(|_| FheError::InvalidEncoding)?;
 
@@ -80,21 +87,19 @@ pub fn unpack_binary_operation(
 pub fn pack_binary_plain_operation(
     public_key: &PublicKey,
     encrypted_argument: &Ciphertext,
-    plaintext_argument: &Signed,
+    plaintext_argument: &Unsigned256,
 ) -> Vec<u8> {
     let packed_public_key = serialize(public_key).unwrap();
     let packed_encrypted_argument = serialize(encrypted_argument).unwrap();
 
-    let arg_offset_1: u32 = packed_public_key.len().try_into().unwrap();
-    let arg_offset_1 = arg_offset_1 + 4;
-
-    let plaintext_int: i64 = (*plaintext_argument).into();
+    let arg_offset_1 = packed_public_key.len() + std::mem::size_of::<Index>();
+    let arg_offset_1: Index = arg_offset_1.try_into().unwrap();
 
     let mut packed = Vec::new();
     packed.extend(arg_offset_1.to_be_bytes());
     packed.extend(packed_public_key);
     packed.extend(packed_encrypted_argument);
-    packed.extend((plaintext_int as u64).to_be_bytes());
+    packed.extend(U256::from(*plaintext_argument).to_be_bytes());
 
     packed
 }
@@ -109,29 +114,28 @@ pub fn pack_binary_plain_operation(
 /// See also the inverse operation [`pack_binary_plain_operation`]
 pub fn unpack_binary_plain_operation(
     input: &[u8],
-) -> Result<(PublicKey, Ciphertext, Signed), FheError> {
-    if input.len() < 12 {
+) -> Result<(PublicKey, Ciphertext, Unsigned256), FheError> {
+    let ix_size = std::mem::size_of::<Index>();
+    let pt_size = std::mem::size_of::<U256>();
+    if input.len() < ix_size + pt_size {
         return Err(FheError::UnexpectedEOF);
     }
-    let ix = &input[..4];
+    let ix = &input[..ix_size];
     // The following unwrap is safe due to length check above
-    let ix = u32::from_be_bytes(ix.try_into().unwrap());
+    let ix = Index::from_be_bytes(ix.try_into().unwrap());
     let ix: usize = ix.try_into().map_err(|_| FheError::PlatformArchitecture)?;
 
-    let public_key = bincode::deserialize(&input[4..ix]).map_err(|_| FheError::InvalidEncoding)?;
-    let encrypted_argument =
-        bincode::deserialize(&input[ix..input.len() - 8]).map_err(|_| FheError::InvalidEncoding)?;
-    let plaintext_argument = &input[input.len() - 8..];
-    let plaintext_argument: u64 = u64::from_be_bytes(
-        plaintext_argument
+    let public_key =
+        bincode::deserialize(&input[ix_size..ix]).map_err(|_| FheError::InvalidEncoding)?;
+    let ciphertext = bincode::deserialize(&input[ix..input.len() - pt_size])
+        .map_err(|_| FheError::InvalidEncoding)?;
+    let plaintext = U256::from_be_bytes(
+        input[input.len() - pt_size..]
             .try_into()
             .map_err(|_| FheError::UnexpectedEOF)?,
     );
-    let plaintext_argument: i64 = plaintext_argument
-        .try_into()
-        .map_err(|_| FheError::Overflow)?;
 
-    Ok((public_key, encrypted_argument, plaintext_argument.into()))
+    Ok((public_key, ciphertext, plaintext.into()))
 }
 
 /// Pack data for a nullary FHE precompile computation, for example
@@ -179,9 +183,12 @@ mod tests {
 
         let a = FHE
             .runtime()
-            .encrypt(Signed::from(16), &public_key)
+            .encrypt(Unsigned256::from(16), &public_key)
             .unwrap();
-        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(4), &public_key)
+            .unwrap();
 
         let input = pack_binary_operation(&public_key, &a, &b);
         let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
@@ -199,9 +206,12 @@ mod tests {
 
         let a = FHE
             .runtime()
-            .encrypt(Signed::from(16), &public_key)
+            .encrypt(Unsigned256::from(16), &public_key)
             .unwrap();
-        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(4), &public_key)
+            .unwrap();
 
         let input = pack_binary_operation(&public_key, &a, &b);
 
@@ -224,9 +234,9 @@ mod tests {
 
         let a = FHE
             .runtime()
-            .encrypt(Signed::from(16), &public_key)
+            .encrypt(Unsigned256::from(16), &public_key)
             .unwrap();
-        let b = Signed::from(4);
+        let b = Unsigned256::from(4);
 
         let input = pack_binary_plain_operation(&public_key, &a, &b);
         let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
@@ -244,9 +254,9 @@ mod tests {
 
         let a = FHE
             .runtime()
-            .encrypt(Signed::from(16), &public_key)
+            .encrypt(Unsigned256::from(16), &public_key)
             .unwrap();
-        let b = Signed::from(4);
+        let b = Unsigned256::from(4);
 
         let input = pack_binary_plain_operation(&public_key, &a, &b);
 
