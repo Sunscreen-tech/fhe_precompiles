@@ -6,8 +6,8 @@ use bincode::serialize;
 use sunscreen::{
     fhe_program,
     types::{bfv::Signed, Cipher},
-    Ciphertext, Compiler, FheApplication, FheProgramInput, FheRuntime, Params, PublicKey, Runtime,
-    RuntimeError,
+    Ciphertext, Compiler, FheApplication, FheProgramInput, FheRuntime, Params, PrivateKey,
+    PublicKey, Runtime, RuntimeError,
 };
 
 /// Expects input to be packed with the
@@ -35,12 +35,27 @@ where
     Ok(serialize(&result).unwrap())
 }
 
+/// Generate keys for an FHE application without the galois keys. Meant to be
+/// wrapped in other functions in this crate only.
+pub(crate) fn generate_keys(runtime: &FheRuntime) -> Result<(PublicKey, PrivateKey), RuntimeError> {
+    runtime.generate_keys().map(|(public_key, private_key)| {
+        (
+            PublicKey {
+                galois_key: None,
+                ..public_key
+            },
+            private_key,
+        )
+    })
+}
+
 pub struct FheApp {
     application: FheApplication,
     runtime: FheRuntime,
 }
 
 impl FheApp {
+    /// Generate the FHE precompile functions for a specific set of parameters.
     pub fn from_params(params: &Params) -> Self {
         let params = params.clone();
         let application = Compiler::new()
@@ -58,6 +73,11 @@ impl FheApp {
             application,
             runtime,
         }
+    }
+
+    /// Generate keys for an FHE application.
+    pub fn generate_keys(&self) -> Result<(PublicKey, PrivateKey), RuntimeError> {
+        generate_keys(&self.runtime)
     }
 
     fn run(
@@ -124,6 +144,10 @@ impl FheApp {
 
         Ok(serialize(&zero).unwrap())
     }
+
+    pub fn runtime(&self) -> &FheRuntime {
+        &self.runtime
+    }
 }
 
 /// Addition
@@ -163,30 +187,30 @@ mod tests {
 
     use super::*;
     use crate::pack::{pack_binary_operation, pack_binary_plain_operation, pack_nullary_operation};
-    use crate::testnet::one::{generate_keys, FHE, RUNTIME};
+    use crate::testnet::one::FHE;
 
     #[test]
     fn fhe_add_works() -> Result<(), RuntimeError> {
-        let (public_key, private_key) = generate_keys().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
-        let a = RUNTIME.encrypt(Signed::from(16), &public_key)?;
-        let b = RUNTIME.encrypt(Signed::from(4), &public_key)?;
+        let a = FHE.runtime.encrypt(Signed::from(16), &public_key)?;
+        let b = FHE.runtime.encrypt(Signed::from(4), &public_key)?;
 
         let result = FHE.run(add, a, b, public_key)?;
-        let c: Signed = RUNTIME.decrypt(&result, &private_key)?;
+        let c: Signed = FHE.runtime.decrypt(&result, &private_key)?;
         assert_eq!(<Signed as Into<i64>>::into(c), 20_i64);
         Ok(())
     }
 
     #[test]
     fn fhe_multiply_works() -> Result<(), RuntimeError> {
-        let (public_key, private_key) = generate_keys().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
-        let a = RUNTIME.encrypt(Signed::from(16), &public_key)?;
-        let b = RUNTIME.encrypt(Signed::from(4), &public_key)?;
+        let a = FHE.runtime.encrypt(Signed::from(16), &public_key)?;
+        let b = FHE.runtime.encrypt(Signed::from(4), &public_key)?;
 
         let result = FHE.run(multiply, a, b, public_key)?;
-        let c: Signed = RUNTIME.decrypt(&result, &private_key)?;
+        let c: Signed = FHE.runtime.decrypt(&result, &private_key)?;
         assert_eq!(<Signed as Into<i64>>::into(c), 64_i64);
         Ok(())
     }
@@ -223,7 +247,7 @@ mod tests {
 
     #[test]
     fn precompile_encrypt_zero_works() -> Result<(), RuntimeError> {
-        let (public_key, private_key) = generate_keys().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         // Encode public_key
         let public_key_enc = pack_nullary_operation(&public_key);
@@ -233,7 +257,7 @@ mod tests {
         // decode it
         let c_encrypted = deserialize(&output).unwrap();
         // decrypt it
-        let c: Signed = RUNTIME.decrypt(&c_encrypted, &private_key)?;
+        let c: Signed = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
 
         assert_eq!(0, <Signed as Into<i64>>::into(c));
         Ok(())
@@ -248,11 +272,11 @@ mod tests {
     where
         F: Fn(&[u8]) -> PrecompileResult,
     {
-        let (public_key, private_key) = generate_keys().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         // Encrypt values
-        let a_encrypted = RUNTIME.encrypt(Signed::from(a), &public_key)?;
-        let b_encrypted = RUNTIME.encrypt(Signed::from(b), &public_key)?;
+        let a_encrypted = FHE.runtime.encrypt(Signed::from(a), &public_key)?;
+        let b_encrypted = FHE.runtime.encrypt(Signed::from(b), &public_key)?;
 
         let input = pack_binary_operation(&public_key, &a_encrypted, &b_encrypted);
 
@@ -263,7 +287,7 @@ mod tests {
         let c_encrypted = deserialize(&output).unwrap();
 
         // decrypt it
-        let c: Signed = RUNTIME.decrypt(&c_encrypted, &private_key)?;
+        let c: Signed = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
 
         assert_eq!(expected, <Signed as Into<i64>>::into(c));
         Ok(())
@@ -278,10 +302,10 @@ mod tests {
     where
         F: Fn(&[u8]) -> PrecompileResult,
     {
-        let (public_key, private_key) = generate_keys().unwrap();
+        let (public_key, private_key) = FHE.generate_keys().unwrap();
 
         // Encrypt a
-        let a_encrypted = RUNTIME.encrypt(Signed::from(a), &public_key)?;
+        let a_encrypted = FHE.runtime.encrypt(Signed::from(a), &public_key)?;
 
         let input = pack_binary_plain_operation(&public_key, &a_encrypted, &Signed::from(b));
 
@@ -292,7 +316,7 @@ mod tests {
         let c_encrypted = deserialize(&output).unwrap();
 
         // decrypt it
-        let c: Signed = RUNTIME.decrypt(&c_encrypted, &private_key)?;
+        let c: Signed = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
 
         assert_eq!(expected, <Signed as Into<i64>>::into(c));
         Ok(())
