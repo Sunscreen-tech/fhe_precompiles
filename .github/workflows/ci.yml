@@ -6,9 +6,6 @@ on:
 
 name: Rust
 
-env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: true
-
 jobs:
 
   build:
