@@ -20,7 +20,7 @@ macro_rules! create_c_precompile_function {
             /// * `output` - A double pointer where the result will be stored on success.
             /// * `output_length` - The length of the output data on success.
             #[no_mangle]
-            pub extern "C" fn [< c_fhe_ $name >] (
+            pub unsafe extern "C" fn [< c_fhe_ $name >] (
                 bytes: *const u8,
                 bytes_length: libc::size_t,
                 output: *mut *mut u8,
