@@ -70,9 +70,56 @@ pub extern "C" fn fhe_error(error_code: i32) -> *const libc::c_char {
     CString::new(bytes).unwrap().into_raw()
 }
 
-create_c_precompile_function!(add);
-create_c_precompile_function!(add_plain);
-create_c_precompile_function!(subtract);
-create_c_precompile_function!(subtract_plain);
-create_c_precompile_function!(multiply);
+// u256
+create_c_precompile_function!(add_cipheru256_cipheru256);
+create_c_precompile_function!(add_cipheru256_u256);
+create_c_precompile_function!(add_u256_cipheru256);
+
+create_c_precompile_function!(sub_cipheru256_cipheru256);
+create_c_precompile_function!(sub_cipheru256_u256);
+create_c_precompile_function!(sub_u256_cipheru256);
+
+create_c_precompile_function!(mul_cipheru256_cipheru256);
+create_c_precompile_function!(mul_cipheru256_u256);
+create_c_precompile_function!(mul_u256_cipheru256);
+
+// u64
+create_c_precompile_function!(add_cipheru64_cipheru64);
+create_c_precompile_function!(add_cipheru64_u64);
+create_c_precompile_function!(add_u64_cipheru64);
+
+create_c_precompile_function!(sub_cipheru64_cipheru64);
+create_c_precompile_function!(sub_cipheru64_u64);
+create_c_precompile_function!(sub_u64_cipheru64);
+
+create_c_precompile_function!(mul_cipheru64_cipheru64);
+create_c_precompile_function!(mul_cipheru64_u64);
+create_c_precompile_function!(mul_u64_cipheru64);
+
+// i64
+create_c_precompile_function!(add_cipheri64_cipheri64);
+create_c_precompile_function!(add_cipheri64_i64);
+create_c_precompile_function!(add_i64_cipheri64);
+
+create_c_precompile_function!(sub_cipheri64_cipheri64);
+create_c_precompile_function!(sub_cipheri64_i64);
+create_c_precompile_function!(sub_i64_cipheri64);
+
+create_c_precompile_function!(mul_cipheri64_cipheri64);
+create_c_precompile_function!(mul_cipheri64_i64);
+create_c_precompile_function!(mul_i64_cipheri64);
+
+// frac64
+create_c_precompile_function!(add_cipherfrac64_cipherfrac64);
+create_c_precompile_function!(add_cipherfrac64_frac64);
+create_c_precompile_function!(add_frac64_cipherfrac64);
+
+create_c_precompile_function!(sub_cipherfrac64_cipherfrac64);
+create_c_precompile_function!(sub_cipherfrac64_frac64);
+create_c_precompile_function!(sub_frac64_cipherfrac64);
+
+create_c_precompile_function!(mul_cipherfrac64_cipherfrac64);
+create_c_precompile_function!(mul_cipherfrac64_frac64);
+create_c_precompile_function!(mul_frac64_cipherfrac64);
+
 create_c_precompile_function!(encrypt_zero);

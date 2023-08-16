@@ -1,25 +1,123 @@
 use bincode::{deserialize, serialize};
-use crypto_bigint::{Encoding, U256};
-use sunscreen::{types::bfv::Unsigned256, Ciphertext, PublicKey};
+use crypto_bigint::{Encoding, U256, U64};
+use sunscreen::{
+    types::bfv::{Fractional, Signed, Unsigned256, Unsigned64},
+    Ciphertext, PublicKey,
+};
 
 use crate::FheError;
 
 /// This is the integral type we use to index into the precompile input byte arrays.
 type Index = u32;
 
-/// Pack data for a binary FHE precompile computation, for example encrypted addition.
-///
+pub trait FHESerialize {
+    fn fhe_serialize(&self) -> Vec<u8>;
+
+    fn fhe_deserialize(bytes: &[u8]) -> Result<Self, FheError>
+    where
+        Self: Sized;
+}
+
+impl FHESerialize for Ciphertext {
+    fn fhe_serialize(&self) -> Vec<u8> {
+        serialize(self).unwrap()
+    }
+
+    fn fhe_deserialize(bytes: &[u8]) -> Result<Self, FheError>
+    where
+        Self: Sized,
+    {
+        deserialize(bytes).map_err(|_| FheError::InvalidEncoding)
+    }
+}
+
+impl FHESerialize for PublicKey {
+    fn fhe_serialize(&self) -> Vec<u8> {
+        serialize(self).unwrap()
+    }
+
+    fn fhe_deserialize(bytes: &[u8]) -> Result<Self, FheError>
+    where
+        Self: Sized,
+    {
+        deserialize(bytes).map_err(|_| FheError::InvalidEncoding)
+    }
+}
+
+impl FHESerialize for Unsigned64 {
+    fn fhe_serialize(&self) -> Vec<u8> {
+        U64::from(*self).to_be_bytes().to_vec()
+    }
+
+    fn fhe_deserialize(bytes: &[u8]) -> Result<Self, FheError>
+    where
+        Self: Sized,
+    {
+        let val = U64::from_be_bytes(bytes.try_into().map_err(|_| FheError::InvalidEncoding)?);
+        Ok(val.into())
+    }
+}
+
+impl FHESerialize for Unsigned256 {
+    fn fhe_serialize(&self) -> Vec<u8> {
+        U256::from(*self).to_be_bytes().to_vec()
+    }
+
+    fn fhe_deserialize(bytes: &[u8]) -> Result<Self, FheError>
+    where
+        Self: Sized,
+    {
+        let val = U256::from_be_bytes(bytes.try_into().map_err(|_| FheError::InvalidEncoding)?);
+        Ok(val.into())
+    }
+}
+
+// Signed currently only has the single size of 64 bits.
+impl FHESerialize for Signed {
+    fn fhe_serialize(&self) -> Vec<u8> {
+        let val: i64 = (*self).into();
+        val.to_be_bytes().to_vec()
+    }
+
+    fn fhe_deserialize(bytes: &[u8]) -> Result<Self, FheError>
+    where
+        Self: Sized,
+    {
+        let val = i64::from_be_bytes(bytes.try_into().map_err(|_| FheError::InvalidEncoding)?);
+        Ok(val.into())
+    }
+}
+
+impl<const N: usize> FHESerialize for Fractional<N> {
+    fn fhe_serialize(&self) -> Vec<u8> {
+        let val: f64 = (*self).into();
+        val.to_be_bytes().to_vec()
+    }
+
+    fn fhe_deserialize(bytes: &[u8]) -> Result<Self, FheError>
+    where
+        Self: Sized,
+    {
+        let val = f64::from_be_bytes(bytes.try_into().map_err(|_| FheError::InvalidEncoding)?);
+        Ok(val.into())
+    }
+}
+
+/// Pack data for a binary FHE precompile computation, for example
+/// addition.
 /// * `public_key` - Public key the parameters are encoded under.
-/// * `a` - First argument to a binary precompile
-/// * `b` - Second argument to a binary precompile
-///
+/// * `a` - First argument to the FHE computation.
+/// * `b` - Second argument to the FHE computation.
 /// Returns a bytestring.
-///
 /// See also the inverse operation [`unpack_binary_operation`]
-pub fn pack_binary_operation(public_key: &PublicKey, a: &Ciphertext, b: &Ciphertext) -> Vec<u8> {
-    let packed_public_key = serialize(public_key).unwrap();
-    let packed_a = serialize(a).unwrap();
-    let packed_b = serialize(b).unwrap();
+pub fn pack_binary_operation<A, B>(public_key: &PublicKey, a: &A, b: &B) -> Vec<u8>
+where
+    A: FHESerialize,
+    B: FHESerialize,
+{
+    let packed_public_key = public_key.fhe_serialize();
+    let packed_a = a.fhe_serialize();
+    let packed_b = b.fhe_serialize();
 
     let arg_offset_1 = packed_public_key.len() + 2 * std::mem::size_of::<Index>();
     let arg_offset_2 = arg_offset_1 + packed_a.len();
@@ -37,19 +135,18 @@ pub fn pack_binary_operation(public_key: &PublicKey, a: &Ciphertext, b: &Ciphert
     packed
 }
 
-/// Unpacks data for a binary FHE precompile computation, for example encrypted addition.
-///
-/// * `input` - Bytestring representing the FHE computation to run.
-///
-/// Returns the public key and `Ciphertext` arguments to the precompile.
-///
+/// Unpack data for a binary FHE precompile computation, for example
+/// addition.
+/// * `input` - Bytestring representing the FHE parameters.
+/// Returns the public key, and the two arguments.
 /// See also the inverse operation [`pack_binary_operation`]
-pub fn unpack_binary_operation(
-    input: &[u8],
-) -> Result<(PublicKey, Ciphertext, Ciphertext), FheError> {
+pub fn unpack_binary_operation<A, B>(input: &[u8]) -> Result<(PublicKey, A, B), FheError>
+where
+    A: FHESerialize,
+    B: FHESerialize,
+{
     let ix_size = std::mem::size_of::<Index>();
-
-    if input.len() < 2 * ix_size {
+    if input.len() < ix_size * 2 {
         return Err(FheError::UnexpectedEOF);
     }
     let ix_1 = &input[..ix_size];
@@ -66,76 +163,11 @@ pub fn unpack_binary_operation(
         .try_into()
         .map_err(|_| FheError::PlatformArchitecture)?;
 
-    let public_key =
-        deserialize(&input[ix_size * 2..ix_1]).map_err(|_| FheError::InvalidEncoding)?;
-    let a = deserialize(&input[ix_1..ix_2]).map_err(|_| FheError::InvalidEncoding)?;
-    let b = deserialize(&input[ix_2..]).map_err(|_| FheError::InvalidEncoding)?;
+    let public_key = PublicKey::fhe_deserialize(&input[ix_size * 2..ix_1])?;
+    let a = A::fhe_deserialize(&input[ix_1..ix_2])?;
+    let b = B::fhe_deserialize(&input[ix_2..])?;
 
     Ok((public_key, a, b))
-}
-
-/// Pack data for a binary plaintext FHE precompile computation, for example
-/// adding a plaintext number to an encrypted number.
-///
-/// * `public_key` - Public key the parameters are encoded under.
-/// * `encrypted_argument` - The encrypted value in the binary operation.
-/// * `plaintext_argument` - The plaintext value in the binary operation.
-///
-/// Returns a bytestring.
-///
-/// See also the inverse operation [`unpack_binary_plain_operation`]
-pub fn pack_binary_plain_operation(
-    public_key: &PublicKey,
-    encrypted_argument: &Ciphertext,
-    plaintext_argument: &Unsigned256,
-) -> Vec<u8> {
-    let packed_public_key = serialize(public_key).unwrap();
-    let packed_encrypted_argument = serialize(encrypted_argument).unwrap();
-
-    let arg_offset_1 = packed_public_key.len() + std::mem::size_of::<Index>();
-    let arg_offset_1: Index = arg_offset_1.try_into().unwrap();
-
-    let mut packed = Vec::new();
-    packed.extend(arg_offset_1.to_be_bytes());
-    packed.extend(packed_public_key);
-    packed.extend(packed_encrypted_argument);
-    packed.extend(U256::from(*plaintext_argument).to_be_bytes());
-
-    packed
-}
-
-/// Unpack data for a binary plaintext FHE precompile computation, for example
-/// adding a plaintext number to an encrypted number.
-///
-/// * `input` - Bytestring representing the FHE computation to run.
-///
-/// Returns the public key and encrypted/plaintext arguments for the precompile.
-///
-/// See also the inverse operation [`pack_binary_plain_operation`]
-pub fn unpack_binary_plain_operation(
-    input: &[u8],
-) -> Result<(PublicKey, Ciphertext, Unsigned256), FheError> {
-    let ix_size = std::mem::size_of::<Index>();
-    let pt_size = std::mem::size_of::<U256>();
-    if input.len() < ix_size + pt_size {
-        return Err(FheError::UnexpectedEOF);
-    }
-    let ix = &input[..ix_size];
-    // The following unwrap is safe due to length check above
-    let ix = Index::from_be_bytes(ix.try_into().unwrap());
-    let ix: usize = ix.try_into().map_err(|_| FheError::PlatformArchitecture)?;
-
-    let public_key =
-        bincode::deserialize(&input[ix_size..ix]).map_err(|_| FheError::InvalidEncoding)?;
-    let ciphertext = bincode::deserialize(&input[ix..input.len() - pt_size])
-        .map_err(|_| FheError::InvalidEncoding)?;
-    let plaintext = U256::from_be_bytes(
-        input[input.len() - pt_size..]
-            .try_into()
-            .map_err(|_| FheError::UnexpectedEOF)?,
-    );
-
-    Ok((public_key, ciphertext, plaintext.into()))
 }
 
 /// Pack data for a nullary FHE precompile computation, for example
@@ -167,110 +199,21 @@ mod tests {
     use bincode::serialize;
 
     use super::*;
-    use crate::pack::{pack_binary_operation, pack_binary_plain_operation, pack_nullary_operation};
+    use crate::pack::pack_nullary_operation;
     use crate::testnet::one::FHE;
+
+    fn serialized_eq<T>(a: &T, b: &T) -> bool
+    where
+        T: ?Sized + serde::Serialize,
+    {
+        serialize(&a).unwrap() == serialize(&b).unwrap()
+    }
 
     fn assert_serialized_eq<T>(a: &T, b: &T)
     where
         T: ?Sized + serde::Serialize,
     {
-        assert_eq!(serialize(&a).unwrap(), serialize(&b).unwrap());
-    }
-
-    #[test]
-    fn unpack_pack_binary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys().unwrap();
-
-        let a = FHE
-            .runtime()
-            .encrypt(Unsigned256::from(16), &public_key)
-            .unwrap();
-        let b = FHE
-            .runtime()
-            .encrypt(Unsigned256::from(4), &public_key)
-            .unwrap();
-
-        let input = pack_binary_operation(&public_key, &a, &b);
-        let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
-            unpack_binary_operation(&input)?;
-
-        assert_serialized_eq(&public_key, &public_key_reconstituted);
-        assert_serialized_eq(&a, &a_reconstituted);
-        assert_serialized_eq(&b, &b_reconstituted);
-        Ok(())
-    }
-
-    #[test]
-    fn pack_unpack_binary_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys().unwrap();
-
-        let a = FHE
-            .runtime()
-            .encrypt(Unsigned256::from(16), &public_key)
-            .unwrap();
-        let b = FHE
-            .runtime()
-            .encrypt(Unsigned256::from(4), &public_key)
-            .unwrap();
-
-        let input = pack_binary_operation(&public_key, &a, &b);
-
-        let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
-            unpack_binary_operation(&input)?;
-
-        let repacked_input = pack_binary_operation(
-            &public_key_reconstituted,
-            &a_reconstituted,
-            &b_reconstituted,
-        );
-
-        assert_serialized_eq(&input, &repacked_input);
-        Ok(())
-    }
-
-    #[test]
-    fn unpack_pack_binary_plain_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys().unwrap();
-
-        let a = FHE
-            .runtime()
-            .encrypt(Unsigned256::from(16), &public_key)
-            .unwrap();
-        let b = Unsigned256::from(4);
-
-        let input = pack_binary_plain_operation(&public_key, &a, &b);
-        let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
-            unpack_binary_plain_operation(&input)?;
-
-        assert_serialized_eq(&public_key, &public_key_reconstituted);
-        assert_serialized_eq(&a, &a_reconstituted);
-        assert_eq!(b, b_reconstituted);
-        Ok(())
-    }
-
-    #[test]
-    fn pack_unpack_binary_plain_is_id() -> Result<(), FheError> {
-        let (public_key, _) = FHE.generate_keys().unwrap();
-
-        let a = FHE
-            .runtime()
-            .encrypt(Unsigned256::from(16), &public_key)
-            .unwrap();
-        let b = Unsigned256::from(4);
-
-        let input = pack_binary_plain_operation(&public_key, &a, &b);
-
-        let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
-            unpack_binary_plain_operation(&input)?;
-
-        let repacked_input = pack_binary_plain_operation(
-            &public_key_reconstituted,
-            &a_reconstituted,
-            &b_reconstituted,
-        );
-
-        assert_serialized_eq(&input, &repacked_input);
-        Ok(())
+        assert!(serialized_eq(a, b));
     }
 
     #[test]
@@ -293,6 +236,622 @@ mod tests {
         let repacked_input = pack_nullary_operation(&public_key_reconstituted);
 
         assert_serialized_eq(&input, &repacked_input);
+        Ok(())
+    }
+
+    // Not precisely the inverse relation because we can't generate random valid
+    // bytestrings.
+    fn unpack_pack_are_inverse<A, B, EqA, EqB>(
+        public_key: PublicKey,
+        a: A,
+        b: B,
+        a_eq: EqA,
+        b_eq: EqB,
+    ) -> Result<(), FheError>
+    where
+        A: FHESerialize,
+        B: FHESerialize,
+        EqA: Fn(&A, &A) -> bool,
+        EqB: Fn(&B, &B) -> bool,
+    {
+        // Test that unpack(pack(x)) == x
+        let input = pack_binary_operation(&public_key, &a, &b);
+        let (public_key_reconstituted, a_reconstituted, b_reconstituted) =
+            unpack_binary_operation(&input)?;
+
+        assert_serialized_eq(&public_key, &public_key_reconstituted);
+
+        if !a_eq(&a, &a_reconstituted) {
+            println!("a != a_reconstituted");
+        }
+
+        if !b_eq(&b, &b_reconstituted) {
+            println!("b != b_reconstituted");
+        }
+
+        // Test that pack(unpack(pack(x))) == pack(x)
+        let input2 = pack_binary_operation(
+            &public_key_reconstituted,
+            &a_reconstituted,
+            &b_reconstituted,
+        );
+        assert_eq!(input2, input);
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256cipher_unsigned256cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(16), &public_key)
+            .unwrap();
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256cipher_unsigned64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(16), &public_key)
+            .unwrap();
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256cipher_signed64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(16), &public_key)
+            .unwrap();
+
+        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256cipher_unsigned256() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(16), &public_key)
+            .unwrap();
+
+        let b = Unsigned256::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256cipher_unsigned64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(16), &public_key)
+            .unwrap();
+
+        let b = Unsigned64::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256cipher_signed64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(16), &public_key)
+            .unwrap();
+
+        let b = Signed::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64cipher_unsigned256cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(16), &public_key)
+            .unwrap();
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64cipher_unsigned64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(16), &public_key)
+            .unwrap();
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64cipher_signed64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(16), &public_key)
+            .unwrap();
+
+        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64cipher_unsigned256() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(16), &public_key)
+            .unwrap();
+
+        let b = Unsigned256::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64cipher_unsigned64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(16), &public_key)
+            .unwrap();
+
+        let b = Unsigned64::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64cipher_signed64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(16), &public_key)
+            .unwrap();
+
+        let b = Signed::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64cipher_unsigned256cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64cipher_unsigned64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64cipher_signed64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
+
+        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64cipher_unsigned256() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
+
+        let b = Unsigned256::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64cipher_unsigned64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
+
+        let b = Unsigned64::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64cipher_signed64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
+
+        let b = Signed::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256_unsigned256cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned256::from(16);
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, std::cmp::PartialEq::eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256_unsigned64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned256::from(16);
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, std::cmp::PartialEq::eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256_signed64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned256::from(16);
+
+        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, std::cmp::PartialEq::eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256_unsigned256() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned256::from(16);
+
+        let b = Unsigned256::from(4);
+
+        unpack_pack_are_inverse(
+            public_key,
+            a,
+            b,
+            std::cmp::PartialEq::eq,
+            std::cmp::PartialEq::eq,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256_unsigned64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned256::from(16);
+
+        let b = Unsigned64::from(4);
+
+        unpack_pack_are_inverse(
+            public_key,
+            a,
+            b,
+            std::cmp::PartialEq::eq,
+            std::cmp::PartialEq::eq,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256_signed64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned256::from(16);
+
+        let b = Signed::from(4);
+
+        unpack_pack_are_inverse(
+            public_key,
+            a,
+            b,
+            std::cmp::PartialEq::eq,
+            std::cmp::PartialEq::eq,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64_unsigned256cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned64::from(16);
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, std::cmp::PartialEq::eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64_unsigned64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned64::from(16);
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, std::cmp::PartialEq::eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64_signed64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned64::from(16);
+
+        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, std::cmp::PartialEq::eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64_unsigned256() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned64::from(16);
+
+        let b = Unsigned256::from(4);
+
+        unpack_pack_are_inverse(
+            public_key,
+            a,
+            b,
+            std::cmp::PartialEq::eq,
+            std::cmp::PartialEq::eq,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64_unsigned64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned64::from(16);
+
+        let b = Unsigned64::from(4);
+
+        unpack_pack_are_inverse(
+            public_key,
+            a,
+            b,
+            std::cmp::PartialEq::eq,
+            std::cmp::PartialEq::eq,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned64_signed64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Unsigned64::from(16);
+
+        let b = Signed::from(4);
+
+        unpack_pack_are_inverse(
+            public_key,
+            a,
+            b,
+            std::cmp::PartialEq::eq,
+            std::cmp::PartialEq::eq,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64_unsigned256cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Signed::from(16);
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, std::cmp::PartialEq::eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64_unsigned64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Signed::from(16);
+
+        let b = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(4), &public_key)
+            .unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, std::cmp::PartialEq::eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64_signed64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Signed::from(16);
+
+        let b = FHE.runtime().encrypt(Signed::from(4), &public_key).unwrap();
+
+        unpack_pack_are_inverse(public_key, a, b, std::cmp::PartialEq::eq, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64_unsigned256() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Signed::from(16);
+
+        let b = Unsigned256::from(4);
+
+        unpack_pack_are_inverse(
+            public_key,
+            a,
+            b,
+            std::cmp::PartialEq::eq,
+            std::cmp::PartialEq::eq,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64_unsigned64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Signed::from(16);
+
+        let b = Unsigned64::from(4);
+
+        unpack_pack_are_inverse(
+            public_key,
+            a,
+            b,
+            std::cmp::PartialEq::eq,
+            std::cmp::PartialEq::eq,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_signed64_signed64() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = Signed::from(16);
+
+        let b = Signed::from(4);
+
+        unpack_pack_are_inverse(
+            public_key,
+            a,
+            b,
+            std::cmp::PartialEq::eq,
+            std::cmp::PartialEq::eq,
+        )?;
         Ok(())
     }
 }
