@@ -7,12 +7,12 @@ edition = "2021"
 crate_type = ["staticlib", "rlib"]
 
 [dependencies]
-crypto-bigint = "0.4.9"
+crypto-bigint = "0.5.2"
 bincode = "1.3.3"
 libc = "0.2.139"
 once_cell = "1.17.1"
-paste = "1.0.12"
-sunscreen = { git = "https://github.com/Sunscreen-tech/Sunscreen", rev = "26bd6dab37e0a5fec13f325a2be40da988062ad0" }
+paste = "1.0.14"
+sunscreen = { git = "https://github.com/Sunscreen-tech/Sunscreen", rev = "4018eab87de46718e05ab9400873c338671b9f83" }
 
 [dev-dependencies]
 serde = "1.0.160"
