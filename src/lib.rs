@@ -6,6 +6,8 @@ pub enum FheError {
     PlatformArchitecture,
     InvalidEncoding,
     Overflow,
+    FailedEncryption,
+    FailedDecryption,
     SunscreenError(RuntimeError),
 }
 
@@ -17,7 +19,9 @@ impl From<FheError> for i32 {
             FheError::PlatformArchitecture => 2,
             FheError::InvalidEncoding => 3,
             FheError::Overflow => 4,
-            FheError::SunscreenError(_) => 5,
+            FheError::FailedDecryption => 5,
+            FheError::FailedEncryption => 6,
+            FheError::SunscreenError(_) => 7,
         }
     }
 }
@@ -32,7 +36,9 @@ impl FheError {
             2 => "Platform architecture invalid",
             3 => "Invalid encoding",
             4 => "Overflow in FHE program",
-            5 => "Base sunscreen error",
+            5 => "Invalid decryption",
+            6 => "Invalid encryption",
+            7 => "Base sunscreen error",
             _ => "Unknown error",
         }
     }

@@ -1,13 +1,14 @@
 use std::ops::{Add, Mul, Sub};
 
 use super::{FheError, PrecompileResult};
-use crate::pack::{unpack_binary_operation, unpack_nullary_operation, FHESerialize};
+use crate::pack::{unpack_binary_operation, unpack_two_arguments, FHESerialize};
 use bincode::serialize;
+use sha2::{Digest, Sha512};
 use sunscreen::{
     fhe_program,
     types::{
         bfv::{Fractional, Signed, Unsigned256, Unsigned64},
-        Cipher,
+        Cipher, TryFromPlaintext, TryIntoPlaintext, TypeName,
     },
     Ciphertext, Compiler, FheApplication, FheProgramInput, FheRuntime, Params, PrivateKey,
     PublicKey, Runtime, RuntimeError,
@@ -40,12 +41,28 @@ pub(crate) fn generate_keys(runtime: &FheRuntime) -> Result<(PublicKey, PrivateK
     })
 }
 
+/// Convert 512 bits in u8 format to u64 format.
+fn u8_bits_to_u64_512_bits(input: [u8; 64]) -> [u64; 8] {
+    input
+        .chunks(8)
+        .map(|x| u64::from_le_bytes(x.try_into().unwrap()))
+        .collect::<Vec<u64>>()
+        .try_into()
+        .unwrap()
+}
+
 pub struct FheApp {
     application: FheApplication,
     runtime: FheRuntime,
+    public_key: PublicKey,
+    private_key: PrivateKey,
 }
 
 impl FheApp {
+    pub fn runtime(&self) -> &FheRuntime {
+        &self.runtime
+    }
+
     /// Generate the FHE precompile functions for a specific set of parameters.
     pub fn from_params(params: &Params) -> Self {
         let params = params.clone();
@@ -95,9 +112,14 @@ impl FheApp {
             .unwrap();
         let runtime = Runtime::new_fhe(&params).unwrap();
 
+        let public_key = bincode::deserialize(include_bytes!("data/network.pub")).unwrap();
+        let private_key = bincode::deserialize(include_bytes!("data/network.pri")).unwrap();
+
         Self {
             application,
             runtime,
+            public_key,
+            private_key,
         }
     }
 
@@ -546,21 +568,206 @@ impl FheApp {
         )
     }
 
-    /// Expects input to be packed with the
-    /// [`pack_nullary_operation`][crate::pack::pack_nullary_operation()]
-    /// function.
-    pub fn encrypt_zero(&self, input: &[u8]) -> PrecompileResult {
-        let public_key = unpack_nullary_operation(input)?;
-        let zero = self
-            .runtime
-            .encrypt(Unsigned256::from(0), &public_key)
-            .map_err(FheError::SunscreenError)?;
+    /**********************************************************************
+     * Threshold network simulation API
+     *********************************************************************/
 
-        Ok(serialize(&zero).unwrap())
+    /**
+     * Encrypt a value with the public key of the network.
+     *
+     * The input is expected to be packed with the
+     * [`pack_two_arguments`][crate::pack::pack_two_arguments()] function.
+     *
+     * The first argument is the plaintext to encrypt, and the second
+     * argument is the public data to be hashed and used as a seed for
+     * encryption.
+     *
+     * The output is the encrypted value.
+     */
+    pub fn encrypt<P>(&self, input: &[u8]) -> PrecompileResult
+    where
+        P: TryFromPlaintext + TryIntoPlaintext + TypeName + FHESerialize,
+    {
+        let (plain, public_data): (P, Vec<u8>) = unpack_two_arguments(input)?;
+
+        let mut hasher = Sha512::new();
+        hasher.update(public_data);
+
+        // Add a uniformly random, private constant 512 bit value
+        hasher.update([
+            15u8, 17, 225, 5, 30, 1, 237, 218, 130, 19, 37, 95, 222, 218, 244, 172, 214, 175, 175,
+            110, 173, 103, 172, 60, 43, 76, 40, 150, 215, 96, 23, 78, 22, 39, 30, 177, 107, 130,
+            124, 109, 27, 96, 206, 125, 104, 241, 10, 40, 88, 238, 117, 118, 79, 113, 213, 110,
+            148, 179, 53, 19, 227, 154, 151, 122,
+        ]);
+        let seed = u8_bits_to_u64_512_bits(hasher.finalize().into());
+
+        let cipher = self
+            .runtime
+            .encrypt_deterministic(plain, &self.public_key, &seed)
+            .map_err(|_| FheError::FailedEncryption)?;
+        Ok(serialize(&cipher).unwrap())
     }
 
-    pub fn runtime(&self) -> &FheRuntime {
-        &self.runtime
+    /**
+     * Reencrypt a value with a given public key.
+     *
+     * The input is expected to be packed with the
+     * [`pack_binary_operation`][crate::pack::pack_binary_operation()] function.
+     *
+     * The first argument is the public key to reencrypt with, the second
+     * argument is the ciphertext to reencrypt, and the third argument is the
+     * public data to be hashed and used as a seed for encryption.
+     *
+     * The output is the reencrypted value.
+     */
+    fn reencrypt_any_key<P>(
+        &self,
+        public_key: &PublicKey,
+        ciphertext: &Ciphertext,
+        public_data: &[u8],
+    ) -> PrecompileResult
+    where
+        P: TryFromPlaintext + TryIntoPlaintext + TypeName + FHESerialize,
+    {
+        let plain: P = self
+            .runtime
+            .decrypt(ciphertext, &self.private_key)
+            .map_err(|_| FheError::FailedDecryption)?;
+
+        let mut hasher = Sha512::new();
+        hasher.update(public_data);
+        hasher.update(plain.fhe_serialize());
+        let seed = u8_bits_to_u64_512_bits(hasher.finalize().into());
+
+        let new_cipher = self
+            .runtime
+            .encrypt_deterministic(plain, public_key, &seed)
+            .map_err(|_| FheError::FailedEncryption)?;
+
+        Ok(serialize(&new_cipher).unwrap())
+    }
+
+    /**
+     * Reencrypt a value from the network key to another key.
+     *
+     * The input is expected to be packed with the
+     * [`pack_binary_operation`][crate::pack::pack_binary_operation()] function.
+     *
+     * The first argument is the public key to reencrypt with, the second
+     * argument is the ciphertext to reencrypt, and the third argument is the
+     * public data to be hashed and used as a seed for encryption.
+     */
+    pub fn reencrypt<P>(&self, input: &[u8]) -> PrecompileResult
+    where
+        P: TryFromPlaintext + TryIntoPlaintext + TypeName + FHESerialize,
+    {
+        let (public_key, ciphertext, public_data): (PublicKey, Ciphertext, Vec<u8>) =
+            unpack_binary_operation(input)?;
+
+        let public_data = vec![public_data, input.to_vec()].concat();
+        self.reencrypt_any_key::<P>(&public_key, &ciphertext, &public_data)
+    }
+
+    /**
+     * Refresh a value with the public key of the network.
+     *
+     * The input is expected to be packed with the
+     * [`pack_binary_operation`][crate::pack::pack_binary_operation()] function.
+     *
+     * The first argument is the ciphertext to refresh, and the second argument
+     * is the public data to be hashed and used as a seed for encryption.
+     *
+     * The output is the refreshed ciphertext.
+     */
+    pub fn refresh<P>(&self, input: &[u8]) -> PrecompileResult
+    where
+        P: TryFromPlaintext + TryIntoPlaintext + TypeName + FHESerialize,
+    {
+        let (ciphertext, public_data): (Ciphertext, Vec<u8>) = unpack_two_arguments(input)?;
+
+        let public_data = vec![public_data, input.to_vec()].concat();
+        self.reencrypt_any_key::<P>(&self.public_key, &ciphertext, &public_data)
+    }
+
+    pub fn public_key_bytes(&self, _input: &[u8]) -> PrecompileResult {
+        Ok(serialize(&self.public_key).unwrap())
+    }
+
+    /**********************************************************************
+     * Threshold network simulation API specialized to specific types
+     *********************************************************************/
+
+    /// See [`encrypt()`][Self::encrypt()] for details. This is a specialized
+    /// variant for the Unsigned256 type.
+    pub fn encrypt_u256(&self, input: &[u8]) -> PrecompileResult {
+        self.encrypt::<Unsigned256>(input)
+    }
+
+    /// See [`encrypt()`][Self::encrypt()] for details. This is a specialized
+    /// variant for the Unsigned64 type.
+    pub fn encrypt_u64(&self, input: &[u8]) -> PrecompileResult {
+        self.encrypt::<Unsigned64>(input)
+    }
+
+    /// See [`encrypt()`][Self::encrypt()] for details. This is a specialized
+    /// variant for the Signed type.
+    pub fn encrypt_i64(&self, input: &[u8]) -> PrecompileResult {
+        self.encrypt::<Signed>(input)
+    }
+
+    /// See [`encrypt()`][Self::encrypt()] for details. This is a specialized
+    /// variant for the Fractional::<64> type.
+    pub fn encrypt_frac64(&self, input: &[u8]) -> PrecompileResult {
+        self.encrypt::<Fractional<64>>(input)
+    }
+
+    /// See [`reencrypt()`][Self::reencrypt()] for details. This is a
+    /// specialized variant for the Unsigned256 type.
+    pub fn reencrypt_u256(&self, input: &[u8]) -> PrecompileResult {
+        self.reencrypt::<Unsigned256>(input)
+    }
+
+    /// See [`reencrypt()`][Self::reencrypt()] for details. This is a
+    /// specialized variant for the Unsigned64 type.
+    pub fn reencrypt_u64(&self, input: &[u8]) -> PrecompileResult {
+        self.reencrypt::<Unsigned64>(input)
+    }
+
+    /// See [`reencrypt()`][Self::reencrypt()] for details. This is a
+    /// specialized variant for the Signed type.
+    pub fn reencrypt_i64(&self, input: &[u8]) -> PrecompileResult {
+        self.reencrypt::<Signed>(input)
+    }
+
+    /// See [`reencrypt()`][Self::reencrypt()] for details. This is a
+    /// specialized variant for the Fractional::<64> type.
+    pub fn reencrypt_frac64(&self, input: &[u8]) -> PrecompileResult {
+        self.reencrypt::<Fractional<64>>(input)
+    }
+
+    /// See [`refresh()`][Self::refresh()] for details. This is a specialized
+    /// variant for the Unsigned256 type.
+    pub fn refresh_u256(&self, input: &[u8]) -> PrecompileResult {
+        self.refresh::<Unsigned256>(input)
+    }
+
+    /// See [`refresh()`][Self::refresh()] for details. This is a specialized
+    /// variant for the Unsigned64 type.
+    pub fn refresh_u64(&self, input: &[u8]) -> PrecompileResult {
+        self.refresh::<Unsigned64>(input)
+    }
+
+    /// See [`refresh()`][Self::refresh()] for details. This is a specialized
+    /// variant for the Signed type.
+    pub fn refresh_i64(&self, input: &[u8]) -> PrecompileResult {
+        self.refresh::<Signed>(input)
+    }
+
+    /// See [`refresh()`][Self::refresh()] for details. This is a specialized
+    /// variant for the Fractional::<64> type.
+    pub fn refresh_frac64(&self, input: &[u8]) -> PrecompileResult {
+        self.refresh::<Fractional<64>>(input)
     }
 }
 
@@ -813,8 +1020,11 @@ mod tests {
     use sunscreen::{types::bfv::Unsigned256, RuntimeError};
 
     use super::*;
-    use crate::pack::{pack_binary_operation, pack_nullary_operation};
+    use crate::pack::{pack_binary_operation, pack_two_arguments};
     use crate::testnet::one::FHE;
+
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
     /**********************************************************************
      * u256 tests
@@ -1861,26 +2071,104 @@ mod tests {
     }
 
     /**********************************************************************
-     * encrypt zero tests
+     * Threshold simulation API tests
      *********************************************************************/
 
     #[test]
-    fn precompile_encrypt_zero_works() -> Result<(), RuntimeError> {
-        let (public_key, private_key) = FHE.generate_keys().unwrap();
+    fn fhe_encrypt_test() -> Result<(), RuntimeError> {
+        let value = Unsigned256::from(12);
+        let public_data = vec![1, 2, 3];
 
-        // Encode public_key
-        let public_key_enc = pack_nullary_operation(&public_key);
+        let input = pack_two_arguments(&value, &public_data);
 
-        // run precompile w/o gas
-        let output = FHE.encrypt_zero(&public_key_enc).unwrap();
-        // decode it
-        let c_encrypted = deserialize(&output).unwrap();
-        // decrypt it
-        let c: Unsigned256 = FHE.runtime.decrypt(&c_encrypted, &private_key)?;
+        let result = FHE.encrypt::<Unsigned256>(&input).unwrap();
+        let ciphertext: Ciphertext = bincode::deserialize(&result)?;
 
-        assert_eq!(c, Unsigned256::from(0u64));
+        let decrypted_value: Unsigned256 = FHE.runtime.decrypt(&ciphertext, &FHE.private_key)?;
+
+        assert_eq!(decrypted_value, value);
+
+        // Check that the encryption generated the same value
+        let mut hasher = DefaultHasher::new();
+        result.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        assert_eq!(hash, 124013502026080311);
         Ok(())
     }
+
+    #[test]
+    fn fhe_refresh_test() -> Result<(), RuntimeError> {
+        let value = Unsigned256::from(12);
+
+        let ciphertext =
+            FHE.runtime
+                .encrypt_deterministic(value, &FHE.public_key, &[0, 0, 0, 0, 0, 0, 0, 0])?;
+        let public_data = vec![1, 2, 3];
+
+        let input = pack_two_arguments(&ciphertext, &public_data);
+
+        let result = FHE.refresh::<Unsigned256>(&input).unwrap();
+        let ciphertext: Ciphertext = bincode::deserialize(&result)?;
+
+        let decrypted_value: Unsigned256 = FHE.runtime.decrypt(&ciphertext, &FHE.private_key)?;
+
+        assert_eq!(decrypted_value, value);
+
+        // Check that the encryption generated the same value
+        let mut hasher = DefaultHasher::new();
+        result.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        assert_eq!(hash, 5881610700421441027);
+        Ok(())
+    }
+
+    #[test]
+    fn fhe_reencrypt_test() -> Result<(), RuntimeError> {
+        let public_key =
+            bincode::deserialize(include_bytes!("../tests/data/public_key.bin")).unwrap();
+        let private_key =
+            bincode::deserialize(include_bytes!("../tests/data/private_key.bin")).unwrap();
+
+        let value: Unsigned256 = Unsigned256::from(12);
+        let public_data = vec![1, 2, 3];
+
+        let input = pack_two_arguments(&value, &public_data);
+
+        // Encrypt the ciphertext under the network public key
+        let result = FHE.encrypt::<Unsigned256>(&input).unwrap();
+        let ciphertext: Ciphertext = bincode::deserialize(&result)?;
+
+        // Decrypt under the network key
+        let decrypted_value: Unsigned256 = FHE.runtime.decrypt(&ciphertext, &FHE.private_key)?;
+
+        assert_eq!(decrypted_value, value);
+
+        // Key switch
+        let input = pack_binary_operation(&public_key, &ciphertext, &public_data);
+
+        let result = FHE.reencrypt::<Unsigned256>(&input).unwrap();
+        let ciphertext: Ciphertext = bincode::deserialize(&result)?;
+
+        // Note we are decrypting under the generated private key, not the network key.
+        let decrypted_value: Unsigned256 = FHE.runtime.decrypt(&ciphertext, &private_key)?;
+
+        assert_eq!(decrypted_value, value);
+
+        // Check that the encryption generated the same value
+        let mut hasher = DefaultHasher::new();
+        result.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        assert_eq!(hash, 726770212416783895);
+
+        Ok(())
+    }
+
+    /**********************************************************************
+     * Helper functions
+     *********************************************************************/
 
     fn precompile_fhe_op_works<A, B, C, F>(
         fhe_op: F,
