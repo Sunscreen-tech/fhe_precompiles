@@ -1023,9 +1023,6 @@ mod tests {
     use crate::pack::{pack_binary_operation, pack_two_arguments};
     use crate::testnet::one::FHE;
 
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
     /**********************************************************************
      * u256 tests
      *********************************************************************/
@@ -2089,11 +2086,20 @@ mod tests {
         assert_eq!(decrypted_value, value);
 
         // Check that the encryption generated the same value
-        let mut hasher = DefaultHasher::new();
-        result.hash(&mut hasher);
-        let hash = hasher.finish();
+        let mut hasher = Sha512::new();
+        hasher.update(result);
+        let hash = hasher.finalize();
 
-        assert_eq!(hash, 124013502026080311);
+        assert_eq!(
+            hash,
+            ([
+                137, 159, 248, 16, 120, 136, 94, 231, 221, 42, 28, 137, 56, 39, 239, 114, 74, 64,
+                137, 122, 12, 43, 82, 154, 3, 31, 209, 30, 47, 182, 141, 185, 182, 0, 171, 80, 108,
+                155, 79, 33, 87, 73, 126, 182, 59, 252, 150, 238, 87, 164, 232, 25, 223, 94, 108,
+                114, 227, 16, 201, 233, 92, 42, 135, 128
+            ])
+            .into()
+        );
         Ok(())
     }
 
@@ -2116,11 +2122,20 @@ mod tests {
         assert_eq!(decrypted_value, value);
 
         // Check that the encryption generated the same value
-        let mut hasher = DefaultHasher::new();
-        result.hash(&mut hasher);
-        let hash = hasher.finish();
+        let mut hasher = Sha512::new();
+        hasher.update(result);
+        let hash = hasher.finalize();
 
-        assert_eq!(hash, 5881610700421441027);
+        assert_eq!(
+            hash,
+            ([
+                149, 79, 157, 29, 182, 252, 150, 248, 218, 113, 137, 145, 138, 66, 255, 188, 248,
+                223, 225, 132, 74, 115, 104, 67, 201, 182, 229, 100, 124, 225, 238, 140, 249, 206,
+                49, 92, 246, 18, 251, 201, 53, 250, 110, 116, 200, 46, 123, 147, 53, 40, 40, 253,
+                104, 13, 255, 76, 105, 10, 11, 188, 233, 112, 198, 172
+            ])
+            .into()
+        );
         Ok(())
     }
 
@@ -2157,11 +2172,20 @@ mod tests {
         assert_eq!(decrypted_value, value);
 
         // Check that the encryption generated the same value
-        let mut hasher = DefaultHasher::new();
-        result.hash(&mut hasher);
-        let hash = hasher.finish();
+        let mut hasher = Sha512::new();
+        hasher.update(result);
+        let hash = hasher.finalize();
 
-        assert_eq!(hash, 726770212416783895);
+        assert_eq!(
+            hash,
+            ([
+                239, 77, 150, 203, 195, 183, 219, 64, 59, 80, 6, 58, 156, 146, 154, 46, 223, 234,
+                71, 17, 170, 127, 242, 160, 67, 148, 228, 20, 114, 149, 139, 61, 99, 206, 149, 175,
+                129, 54, 96, 30, 128, 211, 137, 116, 99, 180, 40, 168, 179, 246, 205, 151, 55, 128,
+                198, 136, 36, 48, 149, 176, 46, 53, 117, 77
+            ])
+            .into()
+        );
 
         Ok(())
     }
