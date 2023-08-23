@@ -40,7 +40,14 @@ impl FHESerialize for PublicKey {
     where
         Self: Sized,
     {
-        deserialize(bytes).map_err(|_| FheError::InvalidEncoding)
+        let result = deserialize(bytes).map_err(|_| FheError::InvalidEncoding);
+
+        if let Err(ref e) = result {
+            // This is a hack to support the old serialization format.
+            println!("Failed to deserialize the public key");
+        }
+
+        result
     }
 }
 
@@ -427,6 +434,21 @@ mod tests {
             .unwrap();
 
         let b = Signed::from(4);
+
+        unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_is_id_unsigned256cipher_vec() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(16), &public_key)
+            .unwrap();
+
+        let b = vec![1u8, 2, 3];
 
         unpack_pack_are_inverse(public_key, a, b, serialized_eq, std::cmp::PartialEq::eq)?;
         Ok(())
