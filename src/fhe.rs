@@ -669,27 +669,6 @@ impl FheApp {
         self.reencrypt_any_key::<P>(&public_key, &ciphertext, &public_data)
     }
 
-    /**
-     * Refresh a value with the public key of the network.
-     *
-     * The input is expected to be packed with the
-     * [`pack_binary_operation`][crate::pack::pack_binary_operation()] function.
-     *
-     * The first argument is the ciphertext to refresh, and the second argument
-     * is the public data to be hashed and used as a seed for encryption.
-     *
-     * The output is the refreshed ciphertext.
-     */
-    pub fn refresh<P>(&self, input: &[u8]) -> PrecompileResult
-    where
-        P: TryFromPlaintext + TryIntoPlaintext + TypeName + FHESerialize,
-    {
-        let (ciphertext, public_data): (Ciphertext, Vec<u8>) = unpack_two_arguments(input)?;
-
-        let public_data = vec![public_data, input.to_vec()].concat();
-        self.reencrypt_any_key::<P>(&self.public_key, &ciphertext, &public_data)
-    }
-
     pub fn public_key_bytes(&self, _input: &[u8]) -> PrecompileResult {
         Ok(serialize(&self.public_key).unwrap())
     }
@@ -744,30 +723,6 @@ impl FheApp {
     /// specialized variant for the Fractional::<64> type.
     pub fn reencrypt_frac64(&self, input: &[u8]) -> PrecompileResult {
         self.reencrypt::<Fractional<64>>(input)
-    }
-
-    /// See [`refresh()`][Self::refresh()] for details. This is a specialized
-    /// variant for the Unsigned256 type.
-    pub fn refresh_u256(&self, input: &[u8]) -> PrecompileResult {
-        self.refresh::<Unsigned256>(input)
-    }
-
-    /// See [`refresh()`][Self::refresh()] for details. This is a specialized
-    /// variant for the Unsigned64 type.
-    pub fn refresh_u64(&self, input: &[u8]) -> PrecompileResult {
-        self.refresh::<Unsigned64>(input)
-    }
-
-    /// See [`refresh()`][Self::refresh()] for details. This is a specialized
-    /// variant for the Signed type.
-    pub fn refresh_i64(&self, input: &[u8]) -> PrecompileResult {
-        self.refresh::<Signed>(input)
-    }
-
-    /// See [`refresh()`][Self::refresh()] for details. This is a specialized
-    /// variant for the Fractional::<64> type.
-    pub fn refresh_frac64(&self, input: &[u8]) -> PrecompileResult {
-        self.refresh::<Fractional<64>>(input)
     }
 }
 
@@ -2121,9 +2076,9 @@ mod tests {
                 .encrypt_deterministic(value, &FHE.public_key, &[0, 0, 0, 0, 0, 0, 0, 0])?;
         let public_data = vec![1, 2, 3];
 
-        let input = pack_two_arguments(&ciphertext, &public_data);
+        let input = pack_binary_operation(&FHE.public_key, &ciphertext, &public_data);
 
-        let result = FHE.refresh::<Unsigned256>(&input).unwrap();
+        let result = FHE.reencrypt::<Unsigned256>(&input).unwrap();
         let ciphertext: Ciphertext = bincode::deserialize(&result)?;
 
         let decrypted_value: Unsigned256 = FHE.runtime.decrypt(&ciphertext, &FHE.private_key)?;
@@ -2139,17 +2094,17 @@ mod tests {
             hash,
             (if cfg!(target_os = "macos") {
                 [
-                    149, 79, 157, 29, 182, 252, 150, 248, 218, 113, 137, 145, 138, 66, 255, 188,
-                    248, 223, 225, 132, 74, 115, 104, 67, 201, 182, 229, 100, 124, 225, 238, 140,
-                    249, 206, 49, 92, 246, 18, 251, 201, 53, 250, 110, 116, 200, 46, 123, 147, 53,
-                    40, 40, 253, 104, 13, 255, 76, 105, 10, 11, 188, 233, 112, 198, 172,
+                    91, 80, 194, 10, 13, 87, 144, 242, 224, 202, 212, 76, 130, 142, 14, 240, 66,
+                    33, 101, 232, 239, 96, 146, 126, 72, 5, 240, 91, 165, 118, 170, 215, 232, 150,
+                    214, 117, 139, 75, 131, 43, 103, 255, 41, 24, 197, 207, 244, 40, 131, 52, 159,
+                    211, 164, 148, 59, 137, 202, 61, 172, 178, 165, 177, 56, 22,
                 ]
             } else {
                 [
-                    115, 77, 169, 86, 212, 5, 41, 114, 179, 39, 132, 20, 160, 84, 58, 135, 49, 151,
-                    63, 155, 40, 10, 116, 121, 155, 202, 227, 110, 13, 13, 27, 193, 163, 242, 116,
-                    12, 114, 215, 215, 213, 177, 187, 74, 62, 4, 192, 225, 125, 45, 186, 96, 145,
-                    188, 225, 153, 85, 96, 210, 176, 122, 3, 84, 77, 178,
+                    91, 80, 194, 10, 13, 87, 144, 242, 224, 202, 212, 76, 130, 142, 14, 240, 66,
+                    33, 101, 232, 239, 96, 146, 126, 72, 5, 240, 91, 165, 118, 170, 215, 232, 150,
+                    214, 117, 139, 75, 131, 43, 103, 255, 41, 24, 197, 207, 244, 40, 131, 52, 159,
+                    211, 164, 148, 59, 137, 202, 61, 172, 178, 165, 177, 56, 22,
                 ]
             })
             .into()

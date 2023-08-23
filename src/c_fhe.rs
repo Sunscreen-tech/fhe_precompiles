@@ -133,9 +133,4 @@ create_c_precompile_function!(reencrypt_u64);
 create_c_precompile_function!(reencrypt_i64);
 create_c_precompile_function!(reencrypt_frac64);
 
-create_c_precompile_function!(refresh_u256);
-create_c_precompile_function!(refresh_u64);
-create_c_precompile_function!(refresh_i64);
-create_c_precompile_function!(refresh_frac64);
-
 create_c_precompile_function!(public_key_bytes);
