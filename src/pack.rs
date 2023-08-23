@@ -40,14 +40,7 @@ impl FHESerialize for PublicKey {
     where
         Self: Sized,
     {
-        let result = deserialize(bytes).map_err(|_| FheError::InvalidEncoding);
-
-        if let Err(ref e) = result {
-            // This is a hack to support the old serialization format.
-            println!("Failed to deserialize the public key");
-        }
-
-        result
+        deserialize(bytes).map_err(|_| FheError::InvalidEncoding)
     }
 }
 
