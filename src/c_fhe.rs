@@ -122,4 +122,15 @@ create_c_precompile_function!(mul_cipherfrac64_cipherfrac64);
 create_c_precompile_function!(mul_cipherfrac64_frac64);
 create_c_precompile_function!(mul_frac64_cipherfrac64);
 
-create_c_precompile_function!(encrypt_zero);
+// Threshold network simulation API
+create_c_precompile_function!(encrypt_u256);
+create_c_precompile_function!(encrypt_u64);
+create_c_precompile_function!(encrypt_i64);
+create_c_precompile_function!(encrypt_frac64);
+
+create_c_precompile_function!(reencrypt_u256);
+create_c_precompile_function!(reencrypt_u64);
+create_c_precompile_function!(reencrypt_i64);
+create_c_precompile_function!(reencrypt_frac64);
+
+create_c_precompile_function!(public_key_bytes);
