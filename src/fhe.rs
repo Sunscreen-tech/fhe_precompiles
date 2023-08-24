@@ -665,7 +665,7 @@ impl FheApp {
         let (public_key, ciphertext, public_data): (PublicKey, Ciphertext, Vec<u8>) =
             unpack_binary_operation(input)?;
 
-        let public_data = vec![public_data, input.to_vec()].concat();
+        let public_data = [public_data, input.to_vec()].concat();
         self.reencrypt_any_key::<P>(&public_key, &ciphertext, &public_data)
     }
 
