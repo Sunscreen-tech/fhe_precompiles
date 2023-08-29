@@ -116,6 +116,20 @@ impl FHESerialize for Vec<u8> {
     }
 }
 
+pub fn pack_one_argument<A>(a: &A) -> Vec<u8>
+where
+    A: FHESerialize,
+{
+    a.fhe_serialize()
+}
+
+pub fn unpack_one_argument<A>(input: &[u8]) -> Result<A, FheError>
+where
+    A: FHESerialize,
+{
+    A::fhe_deserialize(input)
+}
+
 pub fn pack_two_arguments<A, B>(a: &A, b: &B) -> Vec<u8>
 where
     A: FHESerialize,
@@ -293,6 +307,109 @@ mod tests {
         let repacked_input = pack_nullary_operation(&public_key_reconstituted);
 
         assert_serialized_eq(&input, &repacked_input);
+        Ok(())
+    }
+
+    fn unpack_pack_one_argument_is_id<A, EqA>(a: A, a_eq: EqA) -> Result<(), FheError>
+    where
+        A: FHESerialize,
+        EqA: Fn(&A, &A) -> bool,
+    {
+        // Test that unpack(pack(x)) == x
+        let input = pack_one_argument(&a);
+        let a_reconstituted = unpack_one_argument(&input)?;
+
+        if !a_eq(&a, &a_reconstituted) {
+            println!("a != a_reconstituted");
+        }
+
+        // Test that pack(unpack(pack(x))) == pack(x)
+        let input2 = pack_one_argument(&a_reconstituted);
+        assert_eq!(input2, input);
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_one_argument_is_id_unsigned256cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned256::from(16), &public_key)
+            .unwrap();
+
+        unpack_pack_one_argument_is_id(a, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_one_argument_is_id_unsigned64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Unsigned64::from(16), &public_key)
+            .unwrap();
+
+        unpack_pack_one_argument_is_id(a, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_one_argument_is_id_signed64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Signed::from(16), &public_key)
+            .unwrap();
+
+        unpack_pack_one_argument_is_id(a, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_one_argument_is_id_frac64cipher() -> Result<(), FheError> {
+        let (public_key, _) = FHE.generate_keys().unwrap();
+
+        let a = FHE
+            .runtime()
+            .encrypt(Fractional::<64>::from(16.0), &public_key)
+            .unwrap();
+
+        unpack_pack_one_argument_is_id(a, serialized_eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_one_argument_is_id_unsigned256() -> Result<(), FheError> {
+        let a = Unsigned256::from(16);
+
+        unpack_pack_one_argument_is_id(a, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_one_argument_is_id_unsigned64() -> Result<(), FheError> {
+        let a = Unsigned64::from(16);
+
+        unpack_pack_one_argument_is_id(a, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_one_argument_is_id_signed64() -> Result<(), FheError> {
+        let a = Signed::from(16);
+
+        unpack_pack_one_argument_is_id(a, std::cmp::PartialEq::eq)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unpack_pack_one_argument_is_id_frac64() -> Result<(), FheError> {
+        let a = Fractional::<64>::from(16.0);
+
+        unpack_pack_one_argument_is_id(a, std::cmp::PartialEq::eq)?;
         Ok(())
     }
 

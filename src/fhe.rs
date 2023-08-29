@@ -1,7 +1,9 @@
 use std::ops::{Add, Mul, Sub};
 
 use super::{FheError, PrecompileResult};
-use crate::pack::{unpack_binary_operation, unpack_two_arguments, FHESerialize};
+use crate::pack::{
+    unpack_binary_operation, unpack_one_argument, unpack_two_arguments, FHESerialize,
+};
 use bincode::serialize;
 use sha2::{Digest, Sha512};
 use sunscreen::{
@@ -669,6 +671,27 @@ impl FheApp {
         self.reencrypt_any_key::<P>(&public_key, &ciphertext, &public_data)
     }
 
+    /**
+     * Decrypt a value encrypted under the network key.
+     *
+     * The input is expected to be packed with the
+     * [`pack_one_argument`][crate::pack::pack_one_argument()] function.
+     *
+     * The argument is the ciphertext to decrypt.
+     */
+    pub fn decrypt<P>(&self, input: &[u8]) -> PrecompileResult
+    where
+        P: TryFromPlaintext + TryIntoPlaintext + TypeName + FHESerialize + std::fmt::Debug,
+    {
+        let ciphertext: Ciphertext = unpack_one_argument(input)?;
+        let plain = self
+            .runtime
+            .decrypt::<P>(&ciphertext, &self.private_key)
+            .map_err(|_| FheError::FailedDecryption)?;
+
+        Ok(plain.fhe_serialize())
+    }
+
     pub fn public_key_bytes(&self, _input: &[u8]) -> PrecompileResult {
         Ok(serialize(&self.public_key).unwrap())
     }
@@ -723,6 +746,30 @@ impl FheApp {
     /// specialized variant for the Fractional::<64> type.
     pub fn reencrypt_frac64(&self, input: &[u8]) -> PrecompileResult {
         self.reencrypt::<Fractional<64>>(input)
+    }
+
+    /// See [`decrypt()`][Self::decrypt()] for details. This is a specialized
+    /// variant for the Unsigned256 type.
+    pub fn decrypt_u256(&self, input: &[u8]) -> PrecompileResult {
+        self.decrypt::<Unsigned256>(input)
+    }
+
+    /// See [`decrypt()`][Self::decrypt()] for details. This is a specialized
+    /// variant for the Unsigned64 type.
+    pub fn decrypt_u64(&self, input: &[u8]) -> PrecompileResult {
+        self.decrypt::<Unsigned64>(input)
+    }
+
+    /// See [`decrypt()`][Self::decrypt()] for details. This is a specialized
+    /// variant for the Signed type.
+    pub fn decrypt_i64(&self, input: &[u8]) -> PrecompileResult {
+        self.decrypt::<Signed>(input)
+    }
+
+    /// See [`decrypt()`][Self::decrypt()] for details. This is a specialized
+    /// variant for the Fractional::<64> type.
+    pub fn decrypt_frac64(&self, input: &[u8]) -> PrecompileResult {
+        self.decrypt::<Fractional<64>>(input)
     }
 }
 
@@ -2168,6 +2215,64 @@ mod tests {
             })
             .into()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn fhe_decrypt_test() -> Result<(), RuntimeError> {
+        // Unsigned256
+        let value = Unsigned256::from(12);
+        let public_data = vec![1, 2, 3];
+
+        let input = pack_two_arguments(&value, &public_data);
+
+        let result = FHE.encrypt::<Unsigned256>(&input).unwrap();
+
+        let decrypted_value: Unsigned256 =
+            Unsigned256::fhe_deserialize(&FHE.decrypt::<Unsigned256>(&result).unwrap()).unwrap();
+
+        assert_eq!(decrypted_value, value);
+
+        // Unsigned64
+        let value = Unsigned64::from(12);
+        let public_data = vec![1, 2, 3];
+
+        let input = pack_two_arguments(&value, &public_data);
+
+        let result = FHE.encrypt::<Unsigned64>(&input).unwrap();
+
+        let decrypted_value: Unsigned64 =
+            Unsigned64::fhe_deserialize(&FHE.decrypt::<Unsigned64>(&result).unwrap()).unwrap();
+
+        assert_eq!(decrypted_value, value);
+
+        // Signed
+        let value = Signed::from(12);
+        let public_data = vec![1, 2, 3];
+
+        let input = pack_two_arguments(&value, &public_data);
+
+        let result = FHE.encrypt::<Signed>(&input).unwrap();
+
+        let decrypted_value: Signed =
+            Signed::fhe_deserialize(&FHE.decrypt::<Signed>(&result).unwrap()).unwrap();
+
+        assert_eq!(decrypted_value, value);
+
+        // Fractional<64>
+        let value = Fractional::<64>::from(12.0);
+        let public_data = vec![1, 2, 3];
+
+        let input = pack_two_arguments(&value, &public_data);
+
+        let result = FHE.encrypt::<Fractional<64>>(&input).unwrap();
+
+        let decrypted_value: Fractional<64> =
+            Fractional::<64>::fhe_deserialize(&FHE.decrypt::<Fractional<64>>(&result).unwrap())
+                .unwrap();
+
+        assert_eq!(decrypted_value, value);
 
         Ok(())
     }
