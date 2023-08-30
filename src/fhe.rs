@@ -602,6 +602,7 @@ impl FheApp {
             124, 109, 27, 96, 206, 125, 104, 241, 10, 40, 88, 238, 117, 118, 79, 113, 213, 110,
             148, 179, 53, 19, 227, 154, 151, 122,
         ]);
+        hasher.update(plain.fhe_serialize());
         let seed = u8_bits_to_u64_512_bits(hasher.finalize().into());
 
         let cipher = self
@@ -2096,10 +2097,10 @@ mod tests {
             hash,
             (if cfg!(target_os = "macos") {
                 [
-                    163, 4, 105, 7, 238, 44, 116, 125, 50, 48, 149, 200, 209, 245, 111, 10, 67, 6,
-                    219, 133, 178, 56, 205, 38, 192, 196, 60, 253, 216, 245, 18, 168, 68, 81, 156,
-                    0, 32, 175, 76, 20, 61, 95, 25, 145, 149, 172, 220, 0, 236, 19, 116, 79, 235,
-                    212, 25, 165, 132, 51, 189, 159, 175, 135, 143, 221,
+                    23, 66, 167, 16, 42, 69, 8, 94, 40, 33, 165, 241, 123, 71, 207, 50, 117, 85,
+                    22, 195, 31, 244, 34, 163, 110, 96, 92, 148, 160, 100, 75, 13, 42, 200, 150,
+                    178, 91, 31, 12, 113, 132, 184, 11, 183, 206, 248, 78, 145, 118, 98, 140, 208,
+                    73, 64, 49, 28, 214, 99, 84, 250, 67, 254, 127, 117,
                 ]
             } else {
                 [
@@ -2111,6 +2112,25 @@ mod tests {
             })
             .into()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn encrypt_same_seed_and_value_works() -> Result<(), RuntimeError> {
+        // Essentially this checks that we have the transparent ciphertexts setting on.
+        let input = pack_two_arguments(&Unsigned256::from(16), &vec![1, 2, 3, 4]);
+        let a = FHE.encrypt::<Unsigned256>(&input).unwrap();
+        let b = FHE.encrypt::<Unsigned256>(&input).unwrap();
+
+        let a = Ciphertext::fhe_deserialize(&a).unwrap();
+        let b = Ciphertext::fhe_deserialize(&b).unwrap();
+
+        let sub_input = pack_binary_operation(&FHE.public_key, &a, &b);
+
+        let result = FHE.sub_cipheru256_cipheru256(&sub_input).unwrap();
+        let c = Unsigned256::fhe_deserialize(&FHE.decrypt_u256(&result).unwrap()).unwrap();
+        assert_eq!(c, Unsigned256::from(0_u64));
+
         Ok(())
     }
 
@@ -2200,10 +2220,10 @@ mod tests {
             hash,
             (if cfg!(target_os = "macos") {
                 [
-                    230, 254, 217, 200, 2, 216, 197, 238, 91, 74, 216, 192, 40, 36, 68, 67, 132,
-                    100, 135, 69, 167, 191, 114, 220, 146, 101, 142, 238, 189, 82, 182, 230, 243,
-                    171, 44, 161, 56, 207, 49, 41, 41, 128, 167, 233, 193, 236, 160, 60, 186, 165,
-                    21, 148, 76, 255, 152, 39, 87, 247, 187, 101, 86, 89, 191, 179,
+                    218, 127, 214, 121, 76, 56, 39, 165, 52, 5, 145, 84, 158, 58, 144, 27, 187, 49,
+                    132, 20, 26, 11, 47, 249, 44, 159, 122, 209, 98, 96, 118, 151, 36, 151, 23,
+                    186, 195, 95, 176, 158, 36, 49, 179, 81, 29, 161, 246, 136, 233, 193, 6, 145,
+                    148, 230, 128, 167, 16, 234, 24, 20, 97, 5, 227, 91,
                 ]
             } else {
                 [
