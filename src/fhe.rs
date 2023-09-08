@@ -58,6 +58,7 @@ pub struct FheApp {
     runtime: FheRuntime,
     public_key: PublicKey,
     private_key: PrivateKey,
+    ct: Ciphertext,
 }
 
 impl FheApp {
@@ -114,15 +115,31 @@ impl FheApp {
             .unwrap();
         let runtime = Runtime::new_fhe(&params).unwrap();
 
-        let public_key = bincode::deserialize(include_bytes!("data/network.pub")).unwrap();
-        let private_key = bincode::deserialize(include_bytes!("data/network.pri")).unwrap();
+        let pub_bytes = include_bytes!("data/network.pub");
+        std::fs::write("/tmp/fhe-1.debug", pub_bytes).unwrap();
+        let public_key = serde_json::from_slice(pub_bytes).unwrap();
+        let pub_bytes_2 = serde_json::to_vec(&public_key).unwrap();
+        std::fs::write("/tmp/fhe-2.debug", pub_bytes_2).unwrap();
+
+        let ct_bytes = include_bytes!("data/network.ct");
+        std::fs::write("/tmp/fhe-ct-1.debug", ct_bytes).unwrap();
+        let ct = serde_json::from_slice(ct_bytes).unwrap();
+        let ct_bytes_2 = serde_json::to_vec(&ct).unwrap();
+        std::fs::write("/tmp/fhe-ct-2.debug", ct_bytes_2).unwrap();
+
+        let private_key = serde_json::from_slice(include_bytes!("data/network.pri")).unwrap();
 
         Self {
             application,
             runtime,
             public_key,
             private_key,
+            ct,
         }
+    }
+
+    pub fn ct(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Ok(serde_json::to_vec(&self.ct)?)
     }
 
     /// Generate keys for an FHE application.
@@ -694,7 +711,7 @@ impl FheApp {
     }
 
     pub fn public_key_bytes(&self, _input: &[u8]) -> PrecompileResult {
-        Ok(serialize(&self.public_key).unwrap())
+        Ok(serde_json::to_vec(&self.public_key).unwrap())
     }
 
     /**********************************************************************
