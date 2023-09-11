@@ -58,6 +58,7 @@ pub struct FheApp {
     runtime: FheRuntime,
     public_key: PublicKey,
     private_key: PrivateKey,
+    public_key_bytes: Vec<u8>,
 }
 
 impl FheApp {
@@ -114,14 +115,18 @@ impl FheApp {
             .unwrap();
         let runtime = Runtime::new_fhe(&params).unwrap();
 
-        let public_key = bincode::deserialize(include_bytes!("data/network.pub")).unwrap();
-        let private_key = bincode::deserialize(include_bytes!("data/network.pri")).unwrap();
+        let public_key_bytes = include_bytes!("data/network.pub");
+        let private_key_bytes = include_bytes!("data/network.pri");
+
+        let public_key = bincode::deserialize(public_key_bytes).unwrap();
+        let private_key = bincode::deserialize(private_key_bytes).unwrap();
 
         Self {
             application,
             runtime,
             public_key,
             private_key,
+            public_key_bytes: public_key_bytes.to_vec(),
         }
     }
 
@@ -682,7 +687,7 @@ impl FheApp {
      */
     pub fn decrypt<P>(&self, input: &[u8]) -> PrecompileResult
     where
-        P: TryFromPlaintext + TryIntoPlaintext + TypeName + FHESerialize + std::fmt::Debug,
+        P: TryFromPlaintext + TryIntoPlaintext + TypeName + FHESerialize,
     {
         let ciphertext: Ciphertext = unpack_one_argument(input)?;
         let plain = self
@@ -694,7 +699,7 @@ impl FheApp {
     }
 
     pub fn public_key_bytes(&self, _input: &[u8]) -> PrecompileResult {
-        Ok(serialize(&self.public_key).unwrap())
+        Ok(self.public_key_bytes.clone())
     }
 
     /**********************************************************************
